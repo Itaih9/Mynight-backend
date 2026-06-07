@@ -1,0 +1,35 @@
+node_modules/
+dist/
+
+*.log
+logs/
+
+.DS_Store
+.vscode/
+.idea/
+
+coverage/
+*.tsbuildinfo
+
+# Markdown files
+README.md
+
+# Testing files
+*.test.ts
+*.spec.ts
+__tests__/
+test/
+tests/
+
+# Dev environment
+.env.development
+.env.example
+# Uploads
+uploads/
+
+# Env files
+.env
+.env.local
+
+# Scripts
+scripts/
