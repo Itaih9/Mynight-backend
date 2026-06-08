@@ -24,6 +24,18 @@ import * as XLSX from 'xlsx';
 const adminOtpStore = new Map<string, { otp: string; expiresAt: Date }>();
 
 class AdminService {
+  private async getExistingVideoPosterUrl(s3Key: string, mimeType?: string): Promise<string | undefined> {
+    if (!mimeType?.startsWith('video/')) return undefined;
+
+    const posterKey = `${s3Key}-poster.jpg`;
+    try {
+      await s3.headObject({ Bucket: env.S3_BUCKET_NAME, Key: posterKey }).promise();
+      return `${env.CLOUDFRONT_URL}/${posterKey}`;
+    } catch {
+      return undefined;
+    }
+  }
+
   async login(email: string, password: string): Promise<{ email: string }> {
     const admin = await Admin.findOne({ email: email.toLowerCase(), isActive: true });
     if (!admin) {
@@ -745,19 +757,24 @@ class AdminService {
       throw new NotFoundError('Event');
     }
 
-    const photoDocs = uploads.map((upload) => ({
-      eventId,
-      s3Key: upload.s3Key,
-      url: `${env.CLOUDFRONT_URL}/${upload.s3Key}`,
-      thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${upload.s3Key}`,
-      uploadedBy: 'owner',
-      uploaderName: 'צלם האירוע',
-      metadata: {
-        size: upload.size,
-        mimeType: upload.mimeType,
-        ...(upload.width ? { width: upload.width } : {}),
-        ...(upload.height ? { height: upload.height } : {}),
-      },
+    const photoDocs = await Promise.all(uploads.map(async (upload) => {
+      const posterUrl = await this.getExistingVideoPosterUrl(upload.s3Key, upload.mimeType);
+
+      return {
+        eventId,
+        s3Key: upload.s3Key,
+        url: `${env.CLOUDFRONT_URL}/${upload.s3Key}`,
+        thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${upload.s3Key}`,
+        ...(posterUrl ? { posterUrl } : {}),
+        uploadedBy: 'owner',
+        uploaderName: 'צלם האירוע',
+        metadata: {
+          size: upload.size,
+          mimeType: upload.mimeType,
+          ...(upload.width ? { width: upload.width } : {}),
+          ...(upload.height ? { height: upload.height } : {}),
+        },
+      };
     }));
 
     const insertedPhotos = await Photo.insertMany(photoDocs);

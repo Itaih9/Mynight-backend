@@ -46,6 +46,37 @@ class PhotosService {
   private showcaseImageCache: string[] | null = null;
   private cacheExpiry: number = 0;
   private shuffledIdCache = new Map<string, { ids: string[]; total: number; expiresAt: number }>();
+  private pendingVideoPosters = new Map<string, { posterUrl: string; expiresAt: number }>();
+
+  private rememberPendingVideoPoster(s3Key: string, posterKey: string): void {
+    this.pendingVideoPosters.set(s3Key, {
+      posterUrl: `${env.CLOUDFRONT_URL}/${posterKey}`,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
+  }
+
+  private takePendingVideoPoster(s3Key: string): string | undefined {
+    const pending = this.pendingVideoPosters.get(s3Key);
+    if (!pending) return undefined;
+    this.pendingVideoPosters.delete(s3Key);
+    if (pending.expiresAt < Date.now()) return undefined;
+    return pending.posterUrl;
+  }
+
+  private async getExistingVideoPosterUrl(s3Key: string): Promise<string | undefined> {
+    const posterKey = `${s3Key}-poster.jpg`;
+    try {
+      await s3.headObject({ Bucket: env.S3_BUCKET_NAME, Key: posterKey }).promise();
+      return `${env.CLOUDFRONT_URL}/${posterKey}`;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async resolveVideoPosterUrl(s3Key: string, mimeType?: string): Promise<string | undefined> {
+    if (!mimeType?.startsWith('video/')) return undefined;
+    return this.takePendingVideoPoster(s3Key) || await this.getExistingVideoPosterUrl(s3Key);
+  }
 
   private clearShuffleCacheForEvent(eventId: string): void {
     for (const key of this.shuffledIdCache.keys()) {
@@ -120,12 +151,14 @@ class PhotosService {
 
     const url = `${env.CLOUDFRONT_URL}/${s3Key}`;
     const thumbnailUrl = `${env.CLOUDFRONT_URL}/thumbnails/${s3Key}`;
+    const posterUrl = await this.resolveVideoPosterUrl(s3Key, metadata?.mimeType);
 
     const photo = await Photo.create({
       eventId,
       s3Key,
       url,
       thumbnailUrl,
+      ...(posterUrl ? { posterUrl } : {}),
       uploadedBy: 'owner',
       uploaderName: 'צלם האירוע',
       metadata,
@@ -391,12 +424,14 @@ class PhotosService {
 
     const url = `${env.CLOUDFRONT_URL}/${s3Key}`;
     const thumbnailUrl = `${env.CLOUDFRONT_URL}/thumbnails/${s3Key}`;
+    const posterUrl = await this.resolveVideoPosterUrl(s3Key, file.mimetype);
 
     const photo = await Photo.create({
       eventId: event._id,
       s3Key,
       url,
       thumbnailUrl,
+      ...(posterUrl ? { posterUrl } : {}),
       uploadedBy: 'guest',
       uploaderName: guestName || 'אורח',
       metadata: {
@@ -476,12 +511,14 @@ class PhotosService {
 
     const url = `${env.CLOUDFRONT_URL}/${s3Key}`;
     const thumbnailUrl = `${env.CLOUDFRONT_URL}/thumbnails/${s3Key}`;
+    const posterUrl = await this.resolveVideoPosterUrl(s3Key, metadata?.mimeType);
 
     const photo = await Photo.create({
       eventId: event._id,
       s3Key,
       url,
       thumbnailUrl,
+      ...(posterUrl ? { posterUrl } : {}),
       uploadedBy: 'guest',
       uploaderName: guestName || 'אורח',
       metadata: metadata || {},
@@ -516,11 +553,13 @@ class PhotosService {
   async setVideoPoster(s3Key: string, posterKey: string): Promise<IPhoto | null> {
     const photo = await Photo.findOne({ s3Key });
     if (!photo) {
+      this.rememberPendingVideoPoster(s3Key, posterKey);
       logger.warn(`setVideoPoster: photo not found for s3Key=${s3Key}`);
       return null;
     }
     photo.posterUrl = `${env.CLOUDFRONT_URL}/${posterKey}`;
     await photo.save();
+    this.clearShuffleCacheForEvent(String(photo.eventId));
     logger.info(`Poster set for ${s3Key} -> ${posterKey}`);
     return photo;
   }

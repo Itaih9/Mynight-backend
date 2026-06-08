@@ -24,6 +24,8 @@ tests/
 # Dev environment
 .env.development
 .env.example
+.env.*
+
 # Uploads
 uploads/
 
