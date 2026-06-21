@@ -131,7 +131,7 @@ class RekognitionService {
     threshold?: number;
     maxFaces?: number;
   }): Promise<FaceMatchResult[]> {
-    const { collectionId, s3Key, threshold = DEFAULT_MATCH_THRESHOLD, maxFaces = 100 } = params;
+    const { collectionId, s3Key, threshold = DEFAULT_MATCH_THRESHOLD, maxFaces = 371 } = params;
 
     try {
       const result = await rekognition
@@ -173,7 +173,7 @@ class RekognitionService {
     threshold?: number;
     maxFaces?: number;
   }): Promise<FaceMatchResult[]> {
-    const { collectionId, s3Key, threshold = DEFAULT_MATCH_THRESHOLD, maxFaces = 100 } = params;
+    const { collectionId, s3Key, threshold = DEFAULT_MATCH_THRESHOLD, maxFaces = 371 } = params;
     let tempFaceIds: string[] = [];
 
     try {
