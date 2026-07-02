@@ -42,6 +42,18 @@ export function collectPhotoFaceIds(photo: Pick<IPhoto, 'faceId' | 'indexedFaces
   return [...new Set(ids)];
 }
 
+/**
+ * URL of the web-optimized "display" rendition (max 2048px long edge),
+ * generated alongside thumbnails and stored under display/{s3Key}.
+ * Only images get one; videos return undefined and keep using url/posterUrl.
+ * Frontends should fall back to the original `url` if this 404s (e.g. photos
+ * uploaded before the display pipeline existed and not yet backfilled).
+ */
+export function displayUrlFor(s3Key: string, mimeType?: string): string | undefined {
+  if (mimeType && mimeType.startsWith('video/')) return undefined;
+  return `${env.CLOUDFRONT_URL}/display/${s3Key}`;
+}
+
 class PhotosService {
   private showcaseImageCache: string[] | null = null;
   private cacheExpiry: number = 0;
@@ -259,6 +271,7 @@ class PhotosService {
         ...photo.toObject(),
         url: `${env.CLOUDFRONT_URL}/${photo.s3Key}`,
         thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${photo.s3Key}`,
+        displayUrl: displayUrlFor(photo.s3Key, photo.metadata?.mimeType),
         similarity,
       };
     });
@@ -295,6 +308,7 @@ class PhotosService {
         s3Key: p.s3Key,
         url: `${env.CLOUDFRONT_URL}/${p.s3Key}`,
         thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${p.s3Key}`,
+        displayUrl: displayUrlFor(p.s3Key, p.metadata?.mimeType),
         posterUrl: p.posterUrl,
         uploaderName: name,
         uploadedBy: p.uploadedBy,
@@ -328,6 +342,7 @@ class PhotosService {
         ...photo,
         url: `${env.CLOUDFRONT_URL}/${photo.s3Key}`,
         thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${photo.s3Key}`,
+        displayUrl: displayUrlFor(photo.s3Key, (photo as any).metadata?.mimeType),
       }));
 
       const hasMore = skip + limit < total;
@@ -377,6 +392,7 @@ class PhotosService {
         ...photo,
         url: `${env.CLOUDFRONT_URL}/${photo.s3Key}`,
         thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${photo.s3Key}`,
+        displayUrl: displayUrlFor(photo.s3Key, photo.metadata?.mimeType),
       }));
 
     const hasMore = skip + limit < total;
