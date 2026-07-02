@@ -11,7 +11,7 @@ import { Photo, IPhoto } from '../photos/photos.model';
 import { Payment } from '../payment/payment.model';
 import { ZipJob } from './zipjob.model';
 import { rekognitionService } from '../rekognition/rekognition.service';
-import { collectPhotoFaceIds } from '../photos/photos.service';
+import { collectPhotoFaceIds, displayUrlFor } from '../photos/photos.service';
 import { eventsService } from '../events/events.service';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
@@ -851,6 +851,7 @@ class AdminService {
       ...photo,
       url: `${env.CLOUDFRONT_URL}/${photo.s3Key}`,
       thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${photo.s3Key}`,
+      displayUrl: displayUrlFor(photo.s3Key, (photo as any).metadata?.mimeType),
     }));
 
     return { event, photos: photosWithUrls };
