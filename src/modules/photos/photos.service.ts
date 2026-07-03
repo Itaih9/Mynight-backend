@@ -12,7 +12,7 @@ import { Response } from 'express';
 const UPLOAD_WINDOW_DAYS = 180;
 const SHOWCASE_CACHE_TTL = 86400000;
 const SHUFFLE_CACHE_TTL = 300000;
-const PHOTO_GALLERY_FIELDS = '_id s3Key posterUrl uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height';
+const PHOTO_GALLERY_FIELDS = '_id s3Key posterUrl category uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height';
 
 function hashStringToInt(s: string): number {
   let h = 2166136261;
@@ -52,6 +52,33 @@ export function collectPhotoFaceIds(photo: Pick<IPhoto, 'faceId' | 'indexedFaces
 export function displayUrlFor(s3Key: string, mimeType?: string): string | undefined {
   if (mimeType && mimeType.startsWith('video/')) return undefined;
   return `${env.CLOUDFRONT_URL}/display/${s3Key}`;
+}
+
+/**
+ * Normalize a raw moment/subfolder name into a category slug:
+ * trims, lowercases, and strips a leading numeric ordering prefix like "01_".
+ * Returns null for empty/absent input so photos without a moment stay null.
+ */
+export function normalizeCategory(raw?: string | null): string | null {
+  if (!raw) return null;
+  const cleaned = raw
+    .trim()
+    .toLowerCase()
+    .replace(/^\d+[\s._-]*/, '')
+    .trim();
+  return cleaned || null;
+}
+
+/**
+ * Derive a category from a file's (relative) path by taking the top-level
+ * subfolder — e.g. "01_huppah/img_001.jpg" -> "huppah". Files with no subfolder
+ * (e.g. "img_001.jpg") return null. Handles both "/" and "\" separators.
+ */
+export function categoryFromPath(path?: string | null): string | null {
+  if (!path) return null;
+  const segments = path.replace(/\\/g, '/').split('/').filter(Boolean);
+  if (segments.length < 2) return null;
+  return normalizeCategory(segments[0]);
 }
 
 class PhotosService {
@@ -148,7 +175,8 @@ class PhotosService {
   async completeUpload(
     eventId: string,
     s3Key: string,
-    metadata: { size: number; mimeType: string; width?: number; height?: number }
+    metadata: { size: number; mimeType: string; width?: number; height?: number },
+    path?: string
   ): Promise<IPhoto> {
     const event = await Event.findById(eventId);
     if (!event) {
@@ -171,6 +199,7 @@ class PhotosService {
       url,
       thumbnailUrl,
       ...(posterUrl ? { posterUrl } : {}),
+      category: categoryFromPath(path),
       uploadedBy: 'owner',
       uploaderName: 'צלם האירוע',
       metadata,
@@ -296,7 +325,7 @@ class PhotosService {
 
   async getEventStoryGroups(eventId: string): Promise<{ uploaderName: string; items: any[] }[]> {
     const photos = await Photo.find({ eventId })
-      .select('_id s3Key thumbnailUrl posterUrl uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height')
+      .select('_id s3Key thumbnailUrl posterUrl category uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height')
       .sort({ createdAt: -1 })
       .lean();
 
@@ -310,6 +339,7 @@ class PhotosService {
         thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${p.s3Key}`,
         displayUrl: displayUrlFor(p.s3Key, p.metadata?.mimeType),
         posterUrl: p.posterUrl,
+        category: p.category ?? null,
         uploaderName: name,
         uploadedBy: p.uploadedBy,
         createdAt: p.createdAt,
@@ -323,19 +353,25 @@ class PhotosService {
     return Array.from(groups.entries()).map(([uploaderName, items]) => ({ uploaderName, items }));
   }
 
-  async getEventPhotos(eventId: string, page: number = 1, limit: number = 20, seed?: string): Promise<{ photos: IPhoto[]; total: number; hasMore: boolean }> {
+  async getEventPhotos(eventId: string, page: number = 1, limit: number = 20, seed?: string, category?: string): Promise<{ photos: IPhoto[]; total: number; hasMore: boolean }> {
     const skip = (page - 1) * limit;
+
+    const normalizedCategory = normalizeCategory(category);
+    const query: Record<string, any> = { eventId };
+    if (normalizedCategory) {
+      query.category = normalizedCategory;
+    }
 
     if (!seed) {
       logger.debug(`Fetching photos from DB for event ${eventId} (page ${page}, limit ${limit})`);
       const [photos, total] = await Promise.all([
-        Photo.find({ eventId })
+        Photo.find(query)
           .select(PHOTO_GALLERY_FIELDS)
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(limit)
           .lean(),
-        Photo.countDocuments({ eventId }),
+        Photo.countDocuments(query),
       ]);
 
       const photosWithUrls = photos.map((photo) => ({
@@ -343,6 +379,7 @@ class PhotosService {
         url: `${env.CLOUDFRONT_URL}/${photo.s3Key}`,
         thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${photo.s3Key}`,
         displayUrl: displayUrlFor(photo.s3Key, (photo as any).metadata?.mimeType),
+        category: (photo as any).category ?? null,
       }));
 
       const hasMore = skip + limit < total;
@@ -351,14 +388,14 @@ class PhotosService {
     }
 
     logger.debug(`Fetching shuffled photos for event ${eventId} (seed=${seed}, page ${page}, limit ${limit})`);
-    const cacheKey = `${eventId}:${seed}`;
+    const cacheKey = `${eventId}:${seed}:${normalizedCategory ?? ''}`;
     const cached = this.shuffledIdCache.get(cacheKey);
     const cachedIsFresh = Boolean(cached && cached.expiresAt > Date.now());
-    const currentTotal = cachedIsFresh ? await Photo.countDocuments({ eventId }) : null;
+    const currentTotal = cachedIsFresh ? await Photo.countDocuments(query) : null;
     let allIds = cachedIsFresh && cached?.total === currentTotal ? cached.ids : null;
 
     if (!allIds) {
-      const idDocs = await Photo.find({ eventId }).select('_id').sort({ _id: 1 }).lean();
+      const idDocs = await Photo.find(query).select('_id').sort({ _id: 1 }).lean();
       allIds = idDocs.map((d) => String(d._id));
 
       const rng = mulberry32(hashStringToInt(seed));
@@ -393,6 +430,7 @@ class PhotosService {
         url: `${env.CLOUDFRONT_URL}/${photo.s3Key}`,
         thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${photo.s3Key}`,
         displayUrl: displayUrlFor(photo.s3Key, photo.metadata?.mimeType),
+        category: photo.category ?? null,
       }));
 
     const hasMore = skip + limit < total;

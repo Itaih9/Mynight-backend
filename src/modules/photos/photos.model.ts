@@ -6,6 +6,7 @@ export interface IPhoto extends Document {
   url: string;
   thumbnailUrl: string;
   posterUrl?: string;
+  category?: string | null;
   faceId?: string;
   indexedFaces?: Array<{
     faceId: string;
@@ -54,6 +55,10 @@ const photoSchema = new Schema<IPhoto>(
     posterUrl: {
       type: String,
     },
+    category: {
+      type: String,
+      default: null,
+    },
     faceId: {
       type: String,
     },
@@ -97,6 +102,7 @@ const photoSchema = new Schema<IPhoto>(
 
 photoSchema.index({ eventId: 1 });
 photoSchema.index({ eventId: 1, createdAt: -1 });
+photoSchema.index({ eventId: 1, category: 1 });
 photoSchema.index({ faceId: 1 });
 photoSchema.index({ 'indexedFaces.faceId': 1 });
 

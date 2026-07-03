@@ -11,7 +11,7 @@ import { Photo, IPhoto } from '../photos/photos.model';
 import { Payment } from '../payment/payment.model';
 import { ZipJob } from './zipjob.model';
 import { rekognitionService } from '../rekognition/rekognition.service';
-import { collectPhotoFaceIds, displayUrlFor } from '../photos/photos.service';
+import { collectPhotoFaceIds, displayUrlFor, categoryFromPath } from '../photos/photos.service';
 import { eventsService } from '../events/events.service';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
@@ -679,6 +679,7 @@ class AdminService {
         s3Key,
         url,
         thumbnailUrl,
+        category: categoryFromPath(file.originalname),
         uploadedBy: 'owner',
         uploaderName: 'צלם האירוע',
         metadata: {
@@ -750,7 +751,7 @@ class AdminService {
 
   async batchCompleteUpload(
     eventId: string,
-    uploads: { s3Key: string; size: number; mimeType: string; width?: number; height?: number }[]
+    uploads: { s3Key: string; size: number; mimeType: string; width?: number; height?: number; path?: string }[]
   ): Promise<{ created: number }> {
     const event = await Event.findById(eventId);
     if (!event) {
@@ -766,6 +767,7 @@ class AdminService {
         url: `${env.CLOUDFRONT_URL}/${upload.s3Key}`,
         thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${upload.s3Key}`,
         ...(posterUrl ? { posterUrl } : {}),
+        category: categoryFromPath(upload.path),
         uploadedBy: 'owner',
         uploaderName: 'צלם האירוע',
         metadata: {
@@ -852,6 +854,7 @@ class AdminService {
       url: `${env.CLOUDFRONT_URL}/${photo.s3Key}`,
       thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${photo.s3Key}`,
       displayUrl: displayUrlFor(photo.s3Key, (photo as any).metadata?.mimeType),
+      category: (photo as any).category ?? null,
     }));
 
     return { event, photos: photosWithUrls };
@@ -1024,7 +1027,7 @@ class AdminService {
       let pendingSinceLastUpdate = 0;
       const activeUploads: Promise<void>[] = [];
 
-      const processEntry = async (buffer: Buffer, fileName: string, ext: string) => {
+      const processEntry = async (buffer: Buffer, fileName: string, ext: string, category: string | null) => {
         try {
           const cleanName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
           const photoS3Key = `events/${eventCode}/${nanoid()}-${cleanName}`;
@@ -1043,6 +1046,7 @@ class AdminService {
             s3Key: photoS3Key,
             url: `${env.CLOUDFRONT_URL}/${photoS3Key}`,
             thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${photoS3Key}`,
+            category,
             uploadedBy: 'owner',
             uploaderName: 'צלם האירוע',
             metadata: {
@@ -1076,6 +1080,7 @@ class AdminService {
 
         const fileName = filePath.split('/').pop() || '';
         const ext = fileName.toLowerCase().slice(fileName.lastIndexOf('.'));
+        const category = categoryFromPath(filePath);
 
         const shouldSkip =
           fileName.startsWith('.') ||
@@ -1097,7 +1102,7 @@ class AdminService {
           await Promise.race(activeUploads);
         }
 
-        const promise = processEntry(buffer, fileName, ext).then(() => {
+        const promise = processEntry(buffer, fileName, ext, category).then(() => {
           activeUploads.splice(activeUploads.indexOf(promise), 1);
         });
         activeUploads.push(promise);

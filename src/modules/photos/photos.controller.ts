@@ -21,8 +21,8 @@ export class PhotosController {
 
   async completeUpload(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { eventId, s3Key, metadata } = req.body;
-      const photo = await photosService.completeUpload(eventId, s3Key, metadata);
+      const { eventId, s3Key, metadata, path } = req.body;
+      const photo = await photosService.completeUpload(eventId, s3Key, metadata, path);
       res.status(201).json({
         success: true,
         data: photo,
@@ -72,7 +72,8 @@ export class PhotosController {
       const page = Math.max(1, parseInt(req.query.page as string) || 1);
       const limit = Math.min(200, Math.max(10, parseInt(req.query.limit as string) || 20));
       const seed = typeof req.query.seed === 'string' && req.query.seed.length > 0 ? req.query.seed : undefined;
-      const result = await photosService.getEventPhotos(req.params.eventId, page, limit, seed);
+      const category = typeof req.query.category === 'string' && req.query.category.length > 0 ? req.query.category : undefined;
+      const result = await photosService.getEventPhotos(req.params.eventId, page, limit, seed, category);
       res.set('Cache-Control', 'private, max-age=15, stale-while-revalidate=60');
       res.json({
         success: true,

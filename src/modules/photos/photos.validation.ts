@@ -9,6 +9,7 @@ export const getPresignedUrlSchema = z.object({
 export const completeUploadSchema = z.object({
   eventId: z.string(),
   s3Key: z.string(),
+  path: z.string().optional(),
   metadata: z.object({
     size: z.number(),
     mimeType: z.string(),
