@@ -55,16 +55,21 @@ export function displayUrlFor(s3Key: string, mimeType?: string): string | undefi
 }
 
 /**
- * Normalize a raw moment/subfolder name into a category slug:
- * trims, lowercases, and strips a leading numeric ordering prefix like "01_".
- * Returns null for empty/absent input so photos without a moment stay null.
+ * Normalize a raw moment/subfolder name into a category — keep only the words.
+ * Folder names carry ordering noise like "01-חופה", "חופה-2", or "03_כיסא כלה";
+ * we strip leading/trailing digits/dashes/underscores/whitespace and collapse
+ * any remaining separators to single spaces, leaving just the Hebrew words
+ * ("01-חופה" -> "חופה", "03_כיסא כלה" -> "כיסא כלה"). Returns null for
+ * empty/absent input so photos without a moment stay null. This MUST stay in
+ * sync with the frontend's formatCategoryLabel so stored and displayed values
+ * match.
  */
 export function normalizeCategory(raw?: string | null): string | null {
   if (!raw) return null;
   const cleaned = raw
-    .trim()
-    .toLowerCase()
-    .replace(/^\d+[\s._-]*/, '')
+    .replace(/^[\d._\-\s]+/, '')
+    .replace(/[\d._\-\s]+$/, '')
+    .replace(/[._\-\s]+/g, ' ')
     .trim();
   return cleaned || null;
 }
