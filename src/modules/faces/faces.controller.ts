@@ -24,6 +24,7 @@ export class FacesController {
       res.json({
         success: true,
         data: photos,
+        total: photos.length,
       });
     } catch (error) {
       next(error);

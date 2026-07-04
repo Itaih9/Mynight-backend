@@ -1,4 +1,5 @@
 import { Photo } from '../photos/photos.model';
+import { displayUrlFor } from '../photos/photos.service';
 import { Event } from '../events/events.model';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
@@ -85,10 +86,15 @@ class FacesService {
       $or: [{ faceId: rekognitionFaceId }, { 'indexedFaces.faceId': rekognitionFaceId }],
     }).sort({ createdAt: -1 });
 
+    // Shape each photo like a normal gallery photo (url, thumbnailUrl, displayUrl,
+    // category, indexedFaces, metadata) so the frontend face gallery and lightbox
+    // can consume them the same way as the main gallery.
     const photosWithUrls = photos.map((photo) => ({
       ...photo.toObject(),
       url: `${env.CLOUDFRONT_URL}/${photo.s3Key}`,
       thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${photo.s3Key}`,
+      displayUrl: displayUrlFor(photo.s3Key, photo.metadata?.mimeType),
+      category: (photo as any).category ?? null,
     }));
 
     logger.debug(`Found ${photos.length} photos for face ${rekognitionFaceId}`);

@@ -12,7 +12,7 @@ import { Response } from 'express';
 const UPLOAD_WINDOW_DAYS = 180;
 const SHOWCASE_CACHE_TTL = 86400000;
 const SHUFFLE_CACHE_TTL = 300000;
-const PHOTO_GALLERY_FIELDS = '_id s3Key posterUrl category uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height';
+const PHOTO_GALLERY_FIELDS = '_id s3Key posterUrl category indexedFaces uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height';
 
 function hashStringToInt(s: string): number {
   let h = 2166136261;
