@@ -330,7 +330,7 @@ class PhotosService {
 
   async getEventStoryGroups(eventId: string): Promise<{ uploaderName: string; items: any[] }[]> {
     const photos = await Photo.find({ eventId })
-      .select('_id s3Key thumbnailUrl posterUrl category uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height')
+      .select('_id s3Key thumbnailUrl posterUrl category indexedFaces uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height')
       .sort({ createdAt: -1 })
       .lean();
 
@@ -345,6 +345,7 @@ class PhotosService {
         displayUrl: displayUrlFor(p.s3Key, p.metadata?.mimeType),
         posterUrl: p.posterUrl,
         category: p.category ?? null,
+        indexedFaces: (p as any).indexedFaces ?? [],
         uploaderName: name,
         uploadedBy: p.uploadedBy,
         createdAt: p.createdAt,
