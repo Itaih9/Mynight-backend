@@ -1,5 +1,6 @@
 import { Photo } from '../photos/photos.model';
 import { displayUrlFor } from '../photos/photos.service';
+import { rekognitionService } from '../rekognition/rekognition.service';
 import { Event } from '../events/events.model';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
@@ -81,9 +82,23 @@ class FacesService {
       throw new ValidationError('Unauthorized to view photos for this event');
     }
 
+    // A Rekognition FaceId is unique per detected face, so the tapped face id
+    // only ever appears on the single photo it came from. To return ALL photos
+    // of that person, search the collection for the same face and collect every
+    // matching face id, then fetch each photo that contains any of them.
+    const faceIds = new Set<string>([rekognitionFaceId]);
+    if (event.collectionId) {
+      const matches = await rekognitionService.searchByFaceId({
+        collectionId: event.collectionId,
+        faceId: rekognitionFaceId,
+      });
+      for (const m of matches) faceIds.add(m.faceId);
+    }
+    const ids = Array.from(faceIds);
+
     const photos = await Photo.find({
       eventId,
-      $or: [{ faceId: rekognitionFaceId }, { 'indexedFaces.faceId': rekognitionFaceId }],
+      $or: [{ faceId: { $in: ids } }, { 'indexedFaces.faceId': { $in: ids } }],
     }).sort({ createdAt: -1 });
 
     // Shape each photo like a normal gallery photo (url, thumbnailUrl, displayUrl,

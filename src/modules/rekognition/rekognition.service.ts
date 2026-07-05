@@ -167,6 +167,50 @@ class RekognitionService {
     }
   }
 
+  /**
+   * Find the same person across the event's photos, starting from a face id that
+   * is already indexed in the collection (e.g. a face the user tapped in the
+   * lightbox). Returns the matching face ids (excluding the input face, per the
+   * SearchFaces API) so callers can fetch every photo containing this person.
+   */
+  async searchByFaceId(params: {
+    collectionId: string;
+    faceId: string;
+    threshold?: number;
+    maxFaces?: number;
+  }): Promise<FaceMatchResult[]> {
+    const { collectionId, faceId, threshold = DEFAULT_MATCH_THRESHOLD, maxFaces = 4096 } = params;
+
+    try {
+      const result = await rekognition
+        .searchFaces({
+          CollectionId: collectionId,
+          FaceId: faceId,
+          FaceMatchThreshold: threshold,
+          MaxFaces: maxFaces,
+        })
+        .promise();
+
+      return (result.FaceMatches || [])
+        .map((m) => ({
+          faceId: m.Face?.FaceId || '',
+          similarity: m.Similarity || 0,
+          confidence: m.Face?.Confidence || 0,
+          externalImageId: m.Face?.ExternalImageId,
+          boundingBox: m.Face?.BoundingBox,
+        }))
+        .filter((m) => m.faceId)
+        .sort((a, b) => b.similarity - a.similarity);
+    } catch (error: any) {
+      if (error.code === 'ResourceNotFoundException' || error.code === 'InvalidParameterException') {
+        logger.warn(`searchFaces found no match for face ${faceId}: ${error.message}`);
+        return [];
+      }
+      logger.error(`searchFaces by faceId failed: ${error.message}`);
+      return [];
+    }
+  }
+
   async searchByUploadedPhotoAllFaces(params: {
     collectionId: string;
     s3Key: string;
