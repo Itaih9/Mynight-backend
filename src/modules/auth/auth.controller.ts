@@ -1,25 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { authService } from './auth.service';
 import { AuthRequest } from '@/shared/middleware/auth.middleware';
-import { env } from '@/shared/config/env';
 
 export class AuthController {
-  /**
-   * Phone-login slug link: GET /api/auth/phone-login/:phone
-   * Logs into the account owning that (Israeli) phone number and redirects into
-   * the couple's own gallery view. The token is passed in the URL fragment so it
-   * isn't sent to servers/logs/Referer.
-   */
-  async phoneLoginRedirect(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await authService.loginByIdentifier(req.params.phone);
-      const base = env.FRONTEND_URL.replace(/\/+$/, '');
-      res.redirect(`${base}/gallery#authToken=${encodeURIComponent(result.token)}`);
-    } catch (error) {
-      next(error);
-    }
-  }
-
   /**
    * Couple gallery login: POST /api/auth/gallery-login { identifier }
    * The identifier is a phone number or email. Returns a gallery-scoped session
