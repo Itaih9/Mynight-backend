@@ -567,15 +567,18 @@ class AuthService {
   }
 
   /**
-   * Direct login by phone number only (no OTP/password) — used by the
-   * phone-login slug link to drop into a couple's own gallery view.
-   * Israeli numbers are matched flexibly: 0XXXXXXXXX, +972XXXXXXXXX and
-   * +9720XXXXXXXXX (and bare variants) all resolve to the same account,
-   * regardless of how the stored phone happens to be formatted.
+   * Direct login by identifier only (no OTP/password) — used by the couple
+   * gallery-login screen/link to drop into a couple's own gallery view. The
+   * identifier is a phone number or an email. Israeli numbers are matched
+   * flexibly: 0XXXXXXXXX, +972XXXXXXXXX and +9720XXXXXXXXX (and bare variants)
+   * all resolve to the same account, regardless of how the stored phone is
+   * formatted.
    */
-  async loginByPhone(rawPhone: string): Promise<AuthResponse> {
-    const candidates = israeliPhoneCandidates(rawPhone);
-    const user = await User.findOne({ phoneNumber: { $in: candidates } });
+  async loginByIdentifier(identifier: string): Promise<AuthResponse> {
+    const id = (identifier || '').trim();
+    const user = id.includes('@')
+      ? await User.findOne({ email: id.toLowerCase() })
+      : await User.findOne({ phoneNumber: { $in: israeliPhoneCandidates(id) } });
     if (!user) {
       throw new NotFoundError('User');
     }

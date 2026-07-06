@@ -12,9 +12,23 @@ export class AuthController {
    */
   async phoneLoginRedirect(req: Request, res: Response, next: NextFunction) {
     try {
-      const result = await authService.loginByPhone(req.params.phone);
+      const result = await authService.loginByIdentifier(req.params.phone);
       const base = env.FRONTEND_URL.replace(/\/+$/, '');
       res.redirect(`${base}/gallery#authToken=${encodeURIComponent(result.token)}`);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Couple gallery login: POST /api/auth/gallery-login { identifier }
+   * The identifier is a phone number or email. Returns a gallery-scoped session
+   * (same as the link, but the couple types their id on the login screen).
+   */
+  async galleryLogin(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await authService.loginByIdentifier(req.body?.identifier || '');
+      res.json({ success: true, data: result, message: 'Login successful' });
     } catch (error) {
       next(error);
     }
