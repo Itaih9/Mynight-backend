@@ -580,7 +580,8 @@ class AuthService {
       throw new NotFoundError('User');
     }
 
-    const token = this.generateToken(user._id.toString());
+    // Scope the token to the gallery so it can't reach the event-management page.
+    const token = this.generateToken(user._id.toString(), 'gallery');
     const userEvent = await Event.findOne({ userId: user._id }).sort({ createdAt: -1 });
 
     const response: AuthResponse = {
@@ -612,8 +613,10 @@ class AuthService {
     return response;
   }
 
-  private generateToken(userId: string): string {
-    return jwt.sign({ userId }, env.JWT_SECRET, {
+  private generateToken(userId: string, scope?: string): string {
+    const payload: Record<string, unknown> = { userId };
+    if (scope) payload.scope = scope;
+    return jwt.sign(payload, env.JWT_SECRET, {
       expiresIn: env.JWT_EXPIRES_IN as string,
     } as jwt.SignOptions);
   }
