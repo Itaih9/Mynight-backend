@@ -576,22 +576,22 @@ class AuthService {
    */
   async loginByIdentifier(identifier: string): Promise<AuthResponse> {
     const id = (identifier || '').trim();
-    let user = null;
-    if (id.includes('@')) {
-      user = await User.findOne({ email: id.toLowerCase() });
-    } else {
-      user = await User.findOne({ phoneNumber: { $in: israeliPhoneCandidates(id) } });
-      if (!user) {
-        // Fallback: match any stored phone that ends with the 9-digit core, so
-        // unusual stored formats still resolve (the core is unique per number).
-        let digits = id.replace(/\D/g, '');
-        if (digits.startsWith('972')) digits = digits.slice(3);
-        digits = digits.replace(/^0+/, '');
-        if (digits) {
-          user = await User.findOne({ phoneNumber: new RegExp(`${digits}$`) });
-        }
+    const isEmail = id.includes('@');
+    let user = isEmail
+      ? await User.findOne({ email: id.toLowerCase() })
+      : await User.findOne({ phoneNumber: { $in: israeliPhoneCandidates(id) } });
+
+    if (!user && !isEmail) {
+      // Fallback: match any stored phone that ends with the 9-digit core, so
+      // unusual stored formats still resolve (the core is unique per number).
+      let digits = id.replace(/\D/g, '');
+      if (digits.startsWith('972')) digits = digits.slice(3);
+      digits = digits.replace(/^0+/, '');
+      if (digits) {
+        user = await User.findOne({ phoneNumber: new RegExp(`${digits}$`) });
       }
     }
+
     if (!user) {
       logger.warn(`Gallery-login: no account for identifier "${id}"`);
       throw new NotFoundError('User');
