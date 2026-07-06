@@ -566,11 +566,80 @@ class AuthService {
     return user;
   }
 
+  /**
+   * Direct login by phone number only (no OTP/password) — used by the
+   * phone-login slug link to drop into a couple's own gallery view.
+   * Israeli numbers are matched flexibly: 0XXXXXXXXX, +972XXXXXXXXX and
+   * +9720XXXXXXXXX (and bare variants) all resolve to the same account,
+   * regardless of how the stored phone happens to be formatted.
+   */
+  async loginByPhone(rawPhone: string): Promise<AuthResponse> {
+    const candidates = israeliPhoneCandidates(rawPhone);
+    const user = await User.findOne({ phoneNumber: { $in: candidates } });
+    if (!user) {
+      throw new NotFoundError('User');
+    }
+
+    const token = this.generateToken(user._id.toString());
+    const userEvent = await Event.findOne({ userId: user._id }).sort({ createdAt: -1 });
+
+    const response: AuthResponse = {
+      user: {
+        id: user._id.toString(),
+        phoneNumber: user.phoneNumber,
+        name: user.name,
+        email: user.email,
+        partnerName1: user.partnerName1,
+        partnerName2: user.partnerName2,
+        weddingDate: user.weddingDate?.toISOString(),
+        referralCode: user.referralCode,
+      },
+      token,
+    };
+
+    if (userEvent) {
+      response.event = {
+        id: userEvent._id.toString(),
+        eventCode: userEvent.eventCode,
+        customSlug: userEvent.customSlug,
+        isPaid: userEvent.isPaid,
+        packageName: userEvent.packageName,
+        sharingPermissions: userEvent.sharingPermissions,
+      };
+    }
+
+    logger.info(`Phone-login for user ${user._id} (${user.phoneNumber})`);
+    return response;
+  }
+
   private generateToken(userId: string): string {
     return jwt.sign({ userId }, env.JWT_SECRET, {
       expiresIn: env.JWT_EXPIRES_IN as string,
     } as jwt.SignOptions);
   }
+}
+
+/**
+ * All plausible stored formats of an Israeli phone number, derived from any
+ * input. Stored numbers are `+` + digits (see formatPhoneNumber), and the digits
+ * vary by how the user typed it (local 0-prefixed, +972, or +9720). We reduce
+ * the input to its 9-digit core and expand back to every stored variant.
+ */
+function israeliPhoneCandidates(raw: string): string[] {
+  let d = (raw || '').replace(/\D/g, '');
+  if (d.startsWith('972')) d = d.slice(3);
+  d = d.replace(/^0+/, '');
+  const core = d;
+  if (!core) return [];
+  return Array.from(new Set([
+    `+972${core}`,
+    `+9720${core}`,
+    `+0${core}`,
+    `+${core}`,
+    `972${core}`,
+    `0${core}`,
+    core,
+  ]));
 }
 
 export const authService = new AuthService();

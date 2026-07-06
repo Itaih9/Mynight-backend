@@ -24,6 +24,10 @@ router.post('/register/send-otp', authLimiter, otpRateLimiter, validate(register
 router.post('/register/verify-otp', authLimiter, validate(registerVerifyOTPSchema), authController.registerVerifyOTP);
 router.post('/register/direct', authLimiter, validate(registerDirectSchema), authController.registerDirect);
 
+// Phone-login slug link — logs into the account owning that phone and redirects
+// into the couple's gallery view. Rate-limited to slow enumeration/brute force.
+router.get('/phone-login/:phone', loginBruteForceLimiter, authLimiter, authController.phoneLoginRedirect);
+
 router.get('/profile', protect, authController.getProfile);
 router.put('/profile', protect, validate(updateProfileSchema), authController.updateProfile);
 router.put('/set-password', protect, validate(setPasswordSchema), authController.setPassword);
