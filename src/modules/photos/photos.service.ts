@@ -289,7 +289,7 @@ class PhotosService {
     const photos = await Photo.find({
       eventId,
       $or: [{ faceId: { $in: faceIds } }, { 'indexedFaces.faceId': { $in: faceIds } }],
-    }).sort({ createdAt: -1 });
+    }).sort({ createdAt: 1 });
 
     return photos.map((photo) => {
       const photoFaceIds = [
@@ -331,7 +331,7 @@ class PhotosService {
   async getEventStoryGroups(eventId: string): Promise<{ uploaderName: string; items: any[] }[]> {
     const photos = await Photo.find({ eventId })
       .select('_id s3Key thumbnailUrl posterUrl category indexedFaces uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height')
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: 1 })
       .lean();
 
     const groups = new Map<string, any[]>();
@@ -373,7 +373,7 @@ class PhotosService {
       const [photos, total] = await Promise.all([
         Photo.find(query)
           .select(PHOTO_GALLERY_FIELDS)
-          .sort({ createdAt: -1 })
+          .sort({ createdAt: 1 })
           .skip(skip)
           .limit(limit)
           .lean(),

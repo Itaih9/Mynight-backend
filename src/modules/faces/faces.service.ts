@@ -99,7 +99,7 @@ class FacesService {
     const photos = await Photo.find({
       eventId,
       $or: [{ faceId: { $in: ids } }, { 'indexedFaces.faceId': { $in: ids } }],
-    }).sort({ createdAt: -1 });
+    }).sort({ createdAt: 1 });
 
     // Shape each photo like a normal gallery photo (url, thumbnailUrl, displayUrl,
     // category, indexedFaces, metadata) so the frontend face gallery and lightbox
