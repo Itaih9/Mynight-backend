@@ -213,14 +213,17 @@ class AdminService {
   async getCoupons(page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
 
+    // Auto-generated per-event gift coupons are managed from the couple's slug
+    // menu, not this list.
+    const listFilter = { type: { $ne: 'event' } };
     const [coupons, total] = await Promise.all([
-      Coupon.find()
+      Coupon.find(listFilter)
         .select('-__v')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
-      Coupon.countDocuments(),
+      Coupon.countDocuments(listFilter),
     ]);
 
     const ownerIds = Array.from(
@@ -297,6 +300,7 @@ class AdminService {
     maxUses?: number;
     expiresAt?: Date;
     affiliateId?: string;
+    ownerEventId?: string;
   }) {
     const existing = await Coupon.findOne({ code: data.code.toUpperCase() });
     if (existing) {
@@ -319,6 +323,13 @@ class AdminService {
       }
     }
 
+    if (data.ownerEventId) {
+      const ev = await Event.findById(data.ownerEventId);
+      if (!ev) {
+        throw new ValidationError('Event not found');
+      }
+    }
+
     const coupon = await Coupon.create({
       code: data.code.toUpperCase(),
       discountPercent,
@@ -327,6 +338,7 @@ class AdminService {
       expiresAt: data.expiresAt || null,
       isActive: true,
       affiliateId: data.affiliateId,
+      ownerEventId: data.ownerEventId || undefined,
       type: data.affiliateId ? 'affiliate' : 'standard',
     });
 

@@ -116,7 +116,7 @@ export class AdminController {
 
   async createCoupon(req: Request, res: Response, next: NextFunction) {
     try {
-      const { code, discountPercent, discountAmount, maxUses, expiresAt, affiliateId } = req.body;
+      const { code, discountPercent, discountAmount, maxUses, expiresAt, affiliateId, ownerEventId } = req.body;
       const coupon = await adminService.createCoupon({
         code,
         discountPercent,
@@ -124,6 +124,7 @@ export class AdminController {
         maxUses,
         expiresAt: expiresAt ? new Date(expiresAt) : undefined,
         affiliateId,
+        ownerEventId,
       });
       res.status(201).json({
         success: true,
