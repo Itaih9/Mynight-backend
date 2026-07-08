@@ -23,8 +23,8 @@ class PackagesController {
   async update(req: Request, res: Response, next: NextFunction) {
     try {
       const { key } = req.params;
-      const { title, englishTitle, price, order, isActive } = req.body;
-      const updated = await packagesService.update(key, { title, englishTitle, price, order, isActive });
+      const { title, englishTitle, price, order, isActive, compareAtPrice } = req.body;
+      const updated = await packagesService.update(key, { title, englishTitle, price, order, isActive, compareAtPrice });
       res.json({ success: true, data: updated });
     } catch (error) {
       next(error);

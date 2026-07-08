@@ -27,9 +27,12 @@ class PackagesService {
     return Package.find().sort({ order: 1 }).lean();
   }
 
-  async update(key: string, data: Partial<Pick<IPackage, 'title' | 'englishTitle' | 'price' | 'order' | 'isActive'>>): Promise<IPackage> {
+  async update(key: string, data: Partial<Pick<IPackage, 'title' | 'englishTitle' | 'price' | 'order' | 'isActive' | 'compareAtPrice'>>): Promise<IPackage> {
     if (data.price !== undefined && (typeof data.price !== 'number' || data.price < 0)) {
       throw new ValidationError('Price must be a positive number');
+    }
+    if (data.compareAtPrice !== undefined && (typeof data.compareAtPrice !== 'number' || data.compareAtPrice < 0)) {
+      throw new ValidationError('Compare-at price must be a positive number');
     }
     if (data.title !== undefined && !data.title.trim()) {
       throw new ValidationError('Title is required');
