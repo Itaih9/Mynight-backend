@@ -144,9 +144,15 @@ class PaymentService {
     if (couponCode) {
       const couponResult = await couponService.validate(couponCode);
       if (couponResult.valid) {
-        discountPercent = couponResult.discountPercent!;
-        discountAmount = (amount * discountPercent) / 100;
-        finalAmount = amount - discountAmount;
+        discountPercent = couponResult.discountPercent ?? 0;
+        // Fixed-amount (ILS) coupons discount a flat amount; otherwise percent.
+        const fixedDiscount = couponResult.discountAmount && couponResult.discountAmount > 0
+          ? couponResult.discountAmount
+          : 0;
+        discountAmount = fixedDiscount > 0
+          ? Math.min(fixedDiscount, amount)
+          : (amount * discountPercent) / 100;
+        finalAmount = Math.max(0, amount - discountAmount);
 
         if (finalAmount <= 0) {
           const result = await this.payWithCoupon(userId, eventId, couponCode, amount);
