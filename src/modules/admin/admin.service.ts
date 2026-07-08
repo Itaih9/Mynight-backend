@@ -215,15 +215,14 @@ class AdminService {
 
     // Auto-generated per-event gift coupons are managed from the couple's slug
     // menu, not this list.
-    const listFilter = { type: { $ne: 'event' } };
     const [coupons, total] = await Promise.all([
-      Coupon.find(listFilter)
+      Coupon.find({ type: { $ne: 'event' } })
         .select('-__v')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
-      Coupon.countDocuments(listFilter),
+      Coupon.countDocuments({ type: { $ne: 'event' } }),
     ]);
 
     const ownerIds = Array.from(
@@ -247,14 +246,12 @@ class AdminService {
     );
 
     if (allUserIds.length) {
-      const [users, events] = await Promise.all([
-        User.find({ _id: { $in: allUserIds } }).select('_id partnerName1 partnerName2 name').lean(),
-        ownerIds.length
-          ? Event.find({ userId: { $in: ownerIds } }).select('userId name eventCode customSlug').lean()
-          : Promise.resolve([]),
-      ]);
+      const users = await User.find({ _id: { $in: allUserIds } }).select('_id partnerName1 partnerName2 name').lean();
       userMap = new Map(users.map((u: any) => [String(u._id), u]));
-      eventByUserMap = new Map((events as any[]).map((e: any) => [String(e.userId), e]));
+    }
+    if (ownerIds.length) {
+      const events = await Event.find({ userId: { $in: ownerIds } }).select('userId name eventCode customSlug').lean();
+      eventByUserMap = new Map(events.map((e: any) => [String(e.userId), e]));
     }
 
     const coupleNameOf = (u: any) =>
