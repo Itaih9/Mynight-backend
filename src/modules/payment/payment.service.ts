@@ -154,6 +154,8 @@ class PaymentService {
           : (amount * discountPercent) / 100;
         finalAmount = Math.max(0, amount - discountAmount);
 
+        logger.info(`[COUPON-DEBUG] code=${couponCode} valid=${couponResult.valid} pct=${couponResult.discountPercent} fixed=${couponResult.discountAmount} amount=${amount} discount=${discountAmount} final=${finalAmount}`);
+
         if (finalAmount <= 0) {
           const result = await this.payWithCoupon(userId, eventId, couponCode, amount);
           return {
