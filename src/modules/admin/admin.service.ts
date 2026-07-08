@@ -3,6 +3,7 @@ import { Admin, IAdmin } from './admin.model';
 import { User } from '../auth/user.model';
 import { Event } from '../events/events.model';
 import { Coupon } from '../coupon/coupon.model';
+import { couponService } from '../coupon/coupon.service';
 import { Referral } from '../affiliate/referral.model';
 import { Affiliate } from '../affiliate/affiliate.model';
 import { Withdrawal } from '../affiliate/withdrawal.model';
@@ -225,29 +226,54 @@ class AdminService {
     const ownerIds = Array.from(
       new Set(coupons.map((c: any) => c.ownerUserId).filter(Boolean).map((id: any) => String(id)))
     );
+    const eventIds = Array.from(
+      new Set(coupons.map((c: any) => c.ownerEventId).filter(Boolean).map((id: any) => String(id)))
+    );
+
+    // Events referenced directly by event-type coupons.
+    const eventsById = eventIds.length
+      ? await Event.find({ _id: { $in: eventIds } }).select('_id userId name eventCode customSlug').lean()
+      : [];
+    const eventByIdMap = new Map(eventsById.map((e: any) => [String(e._id), e]));
 
     let userMap = new Map<string, any>();
-    let eventMap = new Map<string, any>();
+    let eventByUserMap = new Map<string, any>();
 
-    if (ownerIds.length) {
+    const allUserIds = Array.from(
+      new Set([...ownerIds, ...eventsById.map((e: any) => String(e.userId))])
+    );
+
+    if (allUserIds.length) {
       const [users, events] = await Promise.all([
-        User.find({ _id: { $in: ownerIds } }).select('_id partnerName1 partnerName2 name').lean(),
-        Event.find({ userId: { $in: ownerIds } }).select('userId name eventCode customSlug').lean(),
+        User.find({ _id: { $in: allUserIds } }).select('_id partnerName1 partnerName2 name').lean(),
+        ownerIds.length
+          ? Event.find({ userId: { $in: ownerIds } }).select('userId name eventCode customSlug').lean()
+          : Promise.resolve([]),
       ]);
       userMap = new Map(users.map((u: any) => [String(u._id), u]));
-      eventMap = new Map(events.map((e: any) => [String(e.userId), e]));
+      eventByUserMap = new Map((events as any[]).map((e: any) => [String(e.userId), e]));
     }
 
+    const coupleNameOf = (u: any) =>
+      u ? [u.partnerName1, u.partnerName2].filter(Boolean).join(' & ') || u.name : '';
+
     const enriched = coupons.map((c: any) => {
+      if (c.ownerEventId) {
+        const e = eventByIdMap.get(String(c.ownerEventId));
+        const u = e ? userMap.get(String(e.userId)) : null;
+        return {
+          ...c,
+          ownerCoupleName: coupleNameOf(u) || undefined,
+          ownerEventName: e?.name || undefined,
+          ownerEventCode: e?.eventCode || undefined,
+        };
+      }
       const ownerId = c.ownerUserId ? String(c.ownerUserId) : '';
       const u = ownerId ? userMap.get(ownerId) : null;
-      const e = ownerId ? eventMap.get(ownerId) : null;
-      const coupleName = u
-        ? [u.partnerName1, u.partnerName2].filter(Boolean).join(' & ') || u.name
-        : '';
+      const e = ownerId ? eventByUserMap.get(ownerId) : null;
       return {
         ...c,
-        ownerCoupleName: coupleName || undefined,
+        ownerCoupleName: coupleNameOf(u) || undefined,
         ownerEventName: e?.name || undefined,
         ownerEventCode: e?.eventCode || undefined,
       };
@@ -266,7 +292,8 @@ class AdminService {
 
   async createCoupon(data: {
     code: string;
-    discountPercent: number;
+    discountPercent?: number;
+    discountAmount?: number;
     maxUses?: number;
     expiresAt?: Date;
     affiliateId?: string;
@@ -274,6 +301,15 @@ class AdminService {
     const existing = await Coupon.findOne({ code: data.code.toUpperCase() });
     if (existing) {
       throw new ValidationError('Coupon code already exists');
+    }
+
+    const discountAmount = data.discountAmount && data.discountAmount > 0 ? data.discountAmount : undefined;
+    const discountPercent = discountAmount ? 0 : data.discountPercent ?? 0;
+    if (!discountAmount && !discountPercent) {
+      throw new ValidationError('Provide a discount percent or a fixed amount');
+    }
+    if (discountPercent > 100) {
+      throw new ValidationError('Percentage discount cannot exceed 100');
     }
 
     if (data.affiliateId) {
@@ -285,7 +321,8 @@ class AdminService {
 
     const coupon = await Coupon.create({
       code: data.code.toUpperCase(),
-      discountPercent: data.discountPercent,
+      discountPercent,
+      discountAmount,
       maxUses: data.maxUses || null,
       expiresAt: data.expiresAt || null,
       isActive: true,
@@ -296,6 +333,24 @@ class AdminService {
     logger.info(`Coupon created: ${coupon.code}${data.affiliateId ? ` (affiliate: ${data.affiliateId})` : ''}`);
 
     return coupon;
+  }
+
+  // ---- Event gift-coupon defaults (managed from the coupon dashboard) ----
+
+  async getCouponDefaults() {
+    return couponService.getEventDefaults();
+  }
+
+  async updateCouponDefaults(data: { discountType?: 'percent' | 'fixed'; discountValue?: number; maxUses?: number }) {
+    return couponService.updateEventDefaults(data);
+  }
+
+  async applyCouponDefaultsToExisting() {
+    return couponService.applyDefaultsToExisting();
+  }
+
+  async updateCoupon(couponId: string, data: { discountType?: 'percent' | 'fixed'; discountValue?: number; maxUses?: number; isActive?: boolean }) {
+    return couponService.updateEventCoupon(couponId, data);
   }
 
   async deleteCoupon(couponId: string) {

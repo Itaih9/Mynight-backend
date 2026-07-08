@@ -30,6 +30,10 @@ router.patch('/withdrawals/:withdrawalId/reject', adminProtect, adminController.
 router.get('/events', adminProtect, adminController.getEvents);
 router.get('/coupons', adminProtect, adminController.getCoupons);
 router.post('/coupons', adminProtect, adminController.createCoupon);
+router.get('/coupon-defaults', adminProtect, adminController.getCouponDefaults);
+router.put('/coupon-defaults', adminProtect, adminController.updateCouponDefaults);
+router.post('/coupon-defaults/apply-existing', adminProtect, adminController.applyCouponDefaults);
+router.patch('/coupons/:couponId', adminProtect, adminController.updateCoupon);
 router.delete('/coupons/:couponId', adminProtect, adminController.deleteCoupon);
 router.get('/referrals', adminProtect, adminController.getReferrals);
 router.get('/affiliates', adminProtect, adminController.getAffiliates);

@@ -2,6 +2,7 @@ import { Event, IEvent, IGuestListFile } from './events.model';
 import { User } from '../auth/user.model';
 import { Photo } from '../photos/photos.model';
 import { rekognitionService } from '../rekognition/rekognition.service';
+import { couponService } from '../coupon/coupon.service';
 import { generateEventCode, generateRandomSlugSuffix } from '@/shared/utils/helpers';
 import { NotFoundError, ValidationError } from '@/shared/utils/errors';
 import logger from '@/shared/utils/logger';
@@ -36,7 +37,19 @@ class EventsService {
 
     logger.info(`Event created: ${eventCode} by user ${userId}`);
 
+    await this.ensureGiftCoupon(String(event._id));
+
     return event;
+  }
+
+  // Auto-create the per-event gift coupon shown in the gallery's gift section.
+  // Never let a coupon failure abort event creation.
+  private async ensureGiftCoupon(eventId: string): Promise<void> {
+    try {
+      await couponService.getOrCreateEventCoupon(eventId);
+    } catch (err) {
+      logger.error(`Failed to create gift coupon for event ${eventId}: ${(err as Error).message}`);
+    }
   }
 
   async createEventWithSlug(userId: string, name: string, customSlug: string, weddingDate: Date, packageName?: string): Promise<IEvent> {
@@ -72,6 +85,8 @@ class EventsService {
     });
 
     logger.info(`Event created with slug: ${slug} (code: ${eventCode}) by user ${userId}`);
+
+    await this.ensureGiftCoupon(String(event._id));
 
     return event;
   }

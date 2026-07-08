@@ -116,10 +116,11 @@ export class AdminController {
 
   async createCoupon(req: Request, res: Response, next: NextFunction) {
     try {
-      const { code, discountPercent, maxUses, expiresAt, affiliateId } = req.body;
+      const { code, discountPercent, discountAmount, maxUses, expiresAt, affiliateId } = req.body;
       const coupon = await adminService.createCoupon({
         code,
         discountPercent,
+        discountAmount,
         maxUses,
         expiresAt: expiresAt ? new Date(expiresAt) : undefined,
         affiliateId,
@@ -141,6 +142,45 @@ export class AdminController {
         success: true,
         data: result,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateCoupon(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { couponId } = req.params;
+      const { discountType, discountValue, maxUses, isActive } = req.body;
+      const coupon = await adminService.updateCoupon(couponId, { discountType, discountValue, maxUses, isActive });
+      res.json({ success: true, data: coupon });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getCouponDefaults(_req: Request, res: Response, next: NextFunction) {
+    try {
+      const defaults = await adminService.getCouponDefaults();
+      res.json({ success: true, data: defaults });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateCouponDefaults(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { discountType, discountValue, maxUses } = req.body;
+      const defaults = await adminService.updateCouponDefaults({ discountType, discountValue, maxUses });
+      res.json({ success: true, data: defaults });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async applyCouponDefaults(_req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await adminService.applyCouponDefaultsToExisting();
+      res.json({ success: true, data: result });
     } catch (error) {
       next(error);
     }

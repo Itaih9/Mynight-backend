@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import { couponService } from './coupon.service';
 import { AuthRequest } from '@/shared/middleware/auth.middleware';
 
@@ -50,6 +51,30 @@ class CouponController {
       res.json({
         success: true,
         data: coupon,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getEventCoupon(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { eventId } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(eventId)) {
+        res.json({ success: true, data: null });
+        return;
+      }
+      const coupon = await couponService.getOrCreateEventCoupon(eventId);
+      res.json({
+        success: true,
+        data: {
+          code: coupon.code,
+          discountAmount: coupon.discountAmount,
+          discountPercent: coupon.discountPercent,
+          maxUses: coupon.maxUses,
+          usedCount: coupon.usedCount,
+          isActive: coupon.isActive,
+        },
       });
     } catch (error) {
       next(error);

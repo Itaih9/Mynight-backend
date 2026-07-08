@@ -11,7 +11,11 @@ export interface ICoupon extends Document {
   createdBy?: mongoose.Types.ObjectId;
   affiliateId?: mongoose.Types.ObjectId;
   ownerUserId?: mongoose.Types.ObjectId;
-  type: 'standard' | 'affiliate' | 'prepaid' | 'personal';
+  ownerEventId?: mongoose.Types.ObjectId;
+  // True once an event coupon has been individually edited, so bulk
+  // "apply defaults to existing" leaves it alone.
+  customized?: boolean;
+  type: 'standard' | 'affiliate' | 'prepaid' | 'personal' | 'event';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -62,9 +66,17 @@ const couponSchema = new Schema<ICoupon>(
       type: Schema.Types.ObjectId,
       ref: 'User',
     },
+    ownerEventId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Event',
+    },
+    customized: {
+      type: Boolean,
+      default: false,
+    },
     type: {
       type: String,
-      enum: ['standard', 'affiliate', 'prepaid', 'personal'],
+      enum: ['standard', 'affiliate', 'prepaid', 'personal', 'event'],
       default: 'standard',
     },
   },
@@ -77,6 +89,7 @@ couponSchema.index({ code: 1 });
 couponSchema.index({ isActive: 1 });
 couponSchema.index({ affiliateId: 1 });
 couponSchema.index({ ownerUserId: 1 });
+couponSchema.index({ ownerEventId: 1 });
 couponSchema.index({ type: 1 });
 
 export const Coupon = mongoose.model<ICoupon>('Coupon', couponSchema);
