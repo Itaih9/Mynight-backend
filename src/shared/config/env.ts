@@ -14,6 +14,9 @@ interface EnvConfig {
   AWS_REGION: string;
   S3_BUCKET_NAME: string;
   CLOUDFRONT_URL: string;
+  // Serve transcoded video renditions (display/{s3Key}.mp4). Turn on once the
+  // transcode pipeline is writing them, so we don't 404 on missing renditions.
+  VIDEO_RENDITIONS_ENABLED: boolean;
   REKOGNITION_MIN_CONFIDENCE: number;
   REKOGNITION_FACE_MATCH_THRESHOLD: number;
   SES_EMAIL_FROM: string;
@@ -47,6 +50,7 @@ export const env: EnvConfig = {
   AWS_REGION: getEnv('AWS_REGION', 'us-east-1'),
   S3_BUCKET_NAME: getEnv('S3_BUCKET_NAME'),
   CLOUDFRONT_URL: getEnv('CLOUDFRONT_URL', ''),
+  VIDEO_RENDITIONS_ENABLED: getEnv('VIDEO_RENDITIONS_ENABLED', 'false') === 'true',
   REKOGNITION_MIN_CONFIDENCE: parseInt(getEnv('REKOGNITION_MIN_CONFIDENCE', '80')),
   REKOGNITION_FACE_MATCH_THRESHOLD: parseInt(getEnv('REKOGNITION_FACE_MATCH_THRESHOLD', '70')),
   SES_EMAIL_FROM: getEnv('SES_EMAIL_FROM'),

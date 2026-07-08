@@ -43,14 +43,17 @@ export function collectPhotoFaceIds(photo: Pick<IPhoto, 'faceId' | 'indexedFaces
 }
 
 /**
- * URL of the web-optimized "display" rendition (max 2048px long edge),
- * generated alongside thumbnails and stored under display/{s3Key}.
- * Only images get one; videos return undefined and keep using url/posterUrl.
- * Frontends should fall back to the original `url` if this 404s (e.g. photos
- * uploaded before the display pipeline existed and not yet backfilled).
+ * URL of the web-optimized "display" rendition, generated alongside thumbnails:
+ *  - images: resized (max 2048px long edge) at display/{s3Key}
+ *  - videos: transcoded H.264 + faststart MP4 at display/{s3Key}.mp4
+ * Frontends should fall back to the original `url` if this 404s (media uploaded
+ * before the display pipeline existed and not yet backfilled, or a rendition
+ * still being transcoded).
  */
 export function displayUrlFor(s3Key: string, mimeType?: string): string | undefined {
-  if (mimeType && mimeType.startsWith('video/')) return undefined;
+  if (mimeType && mimeType.startsWith('video/')) {
+    return env.VIDEO_RENDITIONS_ENABLED ? `${env.CLOUDFRONT_URL}/display/${s3Key}.mp4` : undefined;
+  }
   return `${env.CLOUDFRONT_URL}/display/${s3Key}`;
 }
 
