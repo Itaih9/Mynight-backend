@@ -223,7 +223,7 @@ export class PhotosController {
   async getShowcaseImages(_req: Request, res: Response, next: NextFunction) {
     try {
       const images = await photosService.getShowcaseImages();
-      res.set('Cache-Control', 'public, max-age=86400');
+      res.set('Cache-Control', 'public, max-age=300');
       res.json({
         success: true,
         data: images,

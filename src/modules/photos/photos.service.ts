@@ -10,7 +10,7 @@ import archiver from 'archiver';
 import { Response } from 'express';
 
 const UPLOAD_WINDOW_DAYS = 180;
-const SHOWCASE_CACHE_TTL = 86400000;
+const SHOWCASE_CACHE_TTL = 300000; // 5 min — so S3 showcase edits show up quickly
 const SHUFFLE_CACHE_TTL = 300000;
 const PHOTO_GALLERY_FIELDS = '_id s3Key posterUrl category indexedFaces uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height';
 
@@ -89,8 +89,15 @@ export function categoryFromPath(path?: string | null): string | null {
   return normalizeCategory(segments[0]);
 }
 
+export interface ShowcaseMedia {
+  url: string;
+  type: 'photo' | 'video';
+  /** Subfolder under gallery_showcase/ (= story name), or null for grid-only. */
+  story: string | null;
+}
+
 class PhotosService {
-  private showcaseImageCache: string[] | null = null;
+  private showcaseImageCache: ShowcaseMedia[] | null = null;
   private cacheExpiry: number = 0;
   private shuffledIdCache = new Map<string, { ids: string[]; total: number; expiresAt: number }>();
   private pendingVideoPosters = new Map<string, { posterUrl: string; expiresAt: number }>();
@@ -722,35 +729,53 @@ class PhotosService {
     return url;
   }
 
-  async getShowcaseImages(): Promise<string[]> {
+  async getShowcaseImages(): Promise<ShowcaseMedia[]> {
     const now = Date.now();
     if (this.showcaseImageCache && this.cacheExpiry > now) {
-      logger.debug('Returning cached showcase images');
+      logger.debug('Returning cached showcase media');
       return this.showcaseImageCache;
     }
 
-    logger.debug('Fetching showcase images from S3');
+    logger.debug('Fetching showcase media from S3');
     const prefix = 'gallery_showcase/';
-    const result = await s3.listObjectsV2({
-      Bucket: env.S3_BUCKET_NAME,
-      Prefix: prefix,
-    }).promise();
+    const videoExt = /\.(mp4|mov|webm|m4v)$/i;
 
-    if (!result.Contents || result.Contents.length === 0) {
-      return [];
-    }
+    // Collect every object under the prefix (paginated, in case it grows > 1000).
+    const keys: string[] = [];
+    let continuationToken: string | undefined;
+    do {
+      const result = await s3.listObjectsV2({
+        Bucket: env.S3_BUCKET_NAME,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      }).promise();
+      for (const obj of result.Contents || []) {
+        // Skip the prefix itself and any zero-byte "folder" placeholder keys.
+        if (obj.Key && obj.Key !== prefix && !obj.Key.endsWith('/')) keys.push(obj.Key);
+      }
+      continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    if (keys.length === 0) return [];
 
     const cloudFrontUrl = env.CLOUDFRONT_URL;
-    const images = result.Contents
-      .filter(obj => obj.Key && obj.Key !== prefix)
-      .map(obj => `${cloudFrontUrl}/${obj.Key}`)
-      .sort();
+    const encodeKey = (key: string) => key.split('/').map(encodeURIComponent).join('/');
 
-    this.showcaseImageCache = images;
+    const media: ShowcaseMedia[] = keys
+      .sort((a, b) => a.localeCompare(b))
+      .map((key) => {
+        const rest = key.slice(prefix.length); // "<story>/file" or "file"
+        const slash = rest.indexOf('/');
+        const story = slash > 0 ? rest.slice(0, slash) : null;
+        const type: 'photo' | 'video' = videoExt.test(key) ? 'video' : 'photo';
+        return { url: `${cloudFrontUrl}/${encodeKey(key)}`, type, story };
+      });
+
+    this.showcaseImageCache = media;
     this.cacheExpiry = now + SHOWCASE_CACHE_TTL;
-    logger.debug(`Cached ${images.length} showcase images for 1 day`);
+    logger.debug(`Cached ${media.length} showcase media for 1 day`);
 
-    return images;
+    return media;
   }
 }
 
