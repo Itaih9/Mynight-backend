@@ -91,6 +91,10 @@ export function categoryFromPath(path?: string | null): string | null {
 
 export interface ShowcaseMedia {
   url: string;
+  /** Small rendition, when one exists at thumbnails/{key} (else undefined). */
+  thumbnailUrl?: string;
+  /** Capped rendition, when one exists at display/{key} (else undefined). */
+  displayUrl?: string;
   type: 'photo' | 'video';
   /** Subfolder under gallery_showcase/ (= story name), or null for grid-only. */
   story: string | null;
@@ -729,18 +733,8 @@ class PhotosService {
     return url;
   }
 
-  async getShowcaseImages(): Promise<ShowcaseMedia[]> {
-    const now = Date.now();
-    if (this.showcaseImageCache && this.cacheExpiry > now) {
-      logger.debug('Returning cached showcase media');
-      return this.showcaseImageCache;
-    }
-
-    logger.debug('Fetching showcase media from S3');
-    const prefix = 'gallery_showcase/';
-    const videoExt = /\.(mp4|mov|webm|m4v)$/i;
-
-    // Collect every object under the prefix (paginated, in case it grows > 1000).
+  /** Every (non-placeholder) object key under a prefix, paginated. */
+  private async listAllKeys(prefix: string): Promise<string[]> {
     const keys: string[] = [];
     let continuationToken: string | undefined;
     do {
@@ -755,11 +749,36 @@ class PhotosService {
       }
       continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
     } while (continuationToken);
+    return keys;
+  }
+
+  async getShowcaseImages(): Promise<ShowcaseMedia[]> {
+    const now = Date.now();
+    if (this.showcaseImageCache && this.cacheExpiry > now) {
+      logger.debug('Returning cached showcase media');
+      return this.showcaseImageCache;
+    }
+
+    logger.debug('Fetching showcase media from S3');
+    const prefix = 'gallery_showcase/';
+    const videoExt = /\.(mp4|mov|webm|m4v)$/i;
+
+    // Originals, plus whichever renditions already exist. Listing the rendition
+    // prefixes (2 cheap calls, cached) lets us point at them only when they're
+    // really there — no 404-then-fallback per image.
+    const [keys, thumbKeys, displayKeys] = await Promise.all([
+      this.listAllKeys(prefix),
+      this.listAllKeys(`thumbnails/${prefix}`),
+      this.listAllKeys(`display/${prefix}`),
+    ]);
 
     if (keys.length === 0) return [];
 
+    const thumbSet = new Set(thumbKeys);
+    const displaySet = new Set(displayKeys);
     const cloudFrontUrl = env.CLOUDFRONT_URL;
     const encodeKey = (key: string) => key.split('/').map(encodeURIComponent).join('/');
+    const cdn = (key: string) => `${cloudFrontUrl}/${encodeKey(key)}`;
 
     const media: ShowcaseMedia[] = keys
       .sort((a, b) => a.localeCompare(b))
@@ -768,12 +787,21 @@ class PhotosService {
         const slash = rest.indexOf('/');
         const story = slash > 0 ? rest.slice(0, slash) : null;
         const type: 'photo' | 'video' = videoExt.test(key) ? 'video' : 'photo';
-        return { url: `${cloudFrontUrl}/${encodeKey(key)}`, type, story };
+        const thumbKey = `thumbnails/${key}`;
+        const displayKey = `display/${key}`;
+        return {
+          url: cdn(key),
+          thumbnailUrl: thumbSet.has(thumbKey) ? cdn(thumbKey) : undefined,
+          displayUrl: displaySet.has(displayKey) ? cdn(displayKey) : undefined,
+          type,
+          story,
+        };
       });
 
+    const withThumbs = media.filter((m) => m.thumbnailUrl).length;
     this.showcaseImageCache = media;
     this.cacheExpiry = now + SHOWCASE_CACHE_TTL;
-    logger.debug(`Cached ${media.length} showcase media for 1 day`);
+    logger.debug(`Cached ${media.length} showcase media (${withThumbs} with thumbnails)`);
 
     return media;
   }
