@@ -81,10 +81,54 @@ function poster(src, dest) {
   ]);
   const have = new Set([...thumbs, ...displays]);
   const videos = keys.filter((k) => VIDEO_RE.test(k));
-  console.log(`${videos.length} video(s) under ${PREFIX}`);
+  const photos = keys.filter((k) => !VIDEO_RE.test(k));
+  console.log(`${keys.length} object(s) under ${PREFIX}: ${photos.length} photo(s), ${videos.length} video(s)`);
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'showcase-'));
   let processed = 0;
+
+  // Photos first — the grid shows them, so they're what makes the page feel slow.
+  // The Lambda that renditions event uploads is scoped to events/ and never sees
+  // this prefix, so without this every showcase photo is served as its original.
+  let seen = 0;
+  for (const key of photos) {
+    seen++;
+    const needThumb = !have.has(`thumbnails/${key}`);
+    const needDisplay = !have.has(`display/${key}`);
+    if (!needThumb && !needDisplay) continue;
+
+    const src = path.join(tmp, `in${path.extname(key) || '.jpg'}`);
+    process.stdout.write(`[photo ${seen}/${photos.length}] ${key} ... `);
+    try {
+      await download(key, src);
+      const srcBytes = fs.statSync(src).size;
+
+      // scale=W:-2 keeps the aspect ratio. It must match the original's shape or
+      // the lightbox visibly changes crop when the full image replaces the thumb.
+      for (const [width, prefix, quality] of [[800, 'thumbnails', '4'], [1600, 'display', '3']]) {
+        if (!have.has(`${prefix}/${key}`)) {
+          const out = path.join(tmp, `out-${prefix}.jpg`);
+          execFileSync('ffmpeg', ['-y', '-i', src, '-vf', `scale='min(${width},iw)':-2`,
+            '-q:v', quality, out], { stdio: 'ignore' });
+          await s3.upload({
+            Bucket: BUCKET,
+            Key: `${prefix}/${key}`,
+            Body: fs.createReadStream(out),
+            ContentType: 'image/jpeg',
+            CacheControl: 'public, max-age=31536000',
+          }).promise();
+          fs.unlinkSync(out);
+        }
+      }
+      const after = (srcBytes / 1e6).toFixed(1);
+      console.log(`ok (original ${after}MB)`);
+      processed++;
+    } catch (e) {
+      console.log(`FAILED: ${e.message}`);
+    } finally {
+      if (fs.existsSync(src)) fs.unlinkSync(src);
+    }
+  }
 
   for (const key of videos) {
     const needPoster = !have.has(`thumbnails/${key}`);
@@ -135,7 +179,7 @@ function poster(src, dest) {
   }
 
   fs.rmSync(tmp, { recursive: true, force: true });
-  console.log(`done: ${processed} processed, ${videos.length - processed} already had renditions`);
+  console.log(`done: ${processed} processed, ${keys.length - processed} already had renditions or were skipped`);
 })().catch((e) => {
   console.error(e);
   process.exit(1);
