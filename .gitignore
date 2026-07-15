@@ -33,5 +33,8 @@ uploads/
 .env
 .env.local
 
-# Scripts
-scripts/
+# Scripts (local scratch), except the maintenance ones that run on the server.
+# Must exclude the contents, not the dir — git won't descend into an excluded
+# dir, so a negation inside one never matches.
+scripts/*
+!scripts/showcase-video-renditions.js
