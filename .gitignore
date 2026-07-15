@@ -38,3 +38,4 @@ uploads/
 # dir, so a negation inside one never matches.
 scripts/*
 !scripts/showcase-video-renditions.js
+!scripts/event-video-renditions.js
