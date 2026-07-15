@@ -83,12 +83,17 @@ function poster(src, dest) {
   let processed = 0;
   let skipped = 0;
   let failed = 0;
+  let seen = 0;
 
   while (await cursor.hasNext()) {
     if (LIMIT && processed >= LIMIT) break;
     const doc = await cursor.next();
     const key = doc.s3Key;
     if (!key) continue;
+    seen++;
+    // Downloading + transcoding a clip takes a while and is silent; say what
+    // we're on so the run doesn't look hung.
+    process.stdout.write(`[${seen}/${total}] ${key} ... `);
 
     const posterKey = `${key}-poster.jpg`;
     const displayKey = `display/${key}.mp4`;
@@ -98,6 +103,7 @@ function poster(src, dest) {
     const needDisplay = !hasDisplay;
     if (!needPoster && !needDisplay) {
       skipped++;
+      console.log('skip');
       continue;
     }
 
@@ -125,7 +131,7 @@ function poster(src, dest) {
           { _id: doc._id },
           { $set: { posterUrl: `${process.env.CLOUDFRONT_URL}/${posterKey}` } }
         );
-        console.log(`poster   ${key}`);
+        process.stdout.write('poster ');
       }
 
       if (needDisplay) {
@@ -142,15 +148,16 @@ function poster(src, dest) {
         }).promise();
         const before = (obj.Body.length / 1e6).toFixed(1);
         const after = (fs.statSync(out).size / 1e6).toFixed(1);
-        console.log(`display  ${key}  ${before}MB -> ${after}MB`);
+        process.stdout.write(`display ${before}MB -> ${after}MB `);
         fs.unlinkSync(out);
       }
 
       processed++;
+      console.log('ok');
     } catch (e) {
       // One bad file shouldn't end the run.
       failed++;
-      console.error(`FAILED   ${key}: ${e.message}`);
+      console.log(`FAILED: ${e.message}`);
     } finally {
       if (fs.existsSync(src)) fs.unlinkSync(src);
     }
