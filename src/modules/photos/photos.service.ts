@@ -733,9 +733,9 @@ class PhotosService {
     return url;
   }
 
-  /** Every (non-placeholder) object key under a prefix, paginated. */
-  private async listAllKeys(prefix: string): Promise<string[]> {
-    const keys: string[] = [];
+  /** Every (non-placeholder) object under a prefix, paginated. */
+  private async listAllObjects(prefix: string): Promise<{ key: string; etag: string }[]> {
+    const objects: { key: string; etag: string }[] = [];
     let continuationToken: string | undefined;
     do {
       const result = await s3.listObjectsV2({
@@ -745,11 +745,17 @@ class PhotosService {
       }).promise();
       for (const obj of result.Contents || []) {
         // Skip the prefix itself and any zero-byte "folder" placeholder keys.
-        if (obj.Key && obj.Key !== prefix && !obj.Key.endsWith('/')) keys.push(obj.Key);
+        if (obj.Key && obj.Key !== prefix && !obj.Key.endsWith('/')) {
+          objects.push({ key: obj.Key, etag: obj.ETag || obj.Key });
+        }
       }
       continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
     } while (continuationToken);
-    return keys;
+    return objects;
+  }
+
+  private async listAllKeys(prefix: string): Promise<string[]> {
+    return (await this.listAllObjects(prefix)).map((o) => o.key);
   }
 
   async getShowcaseImages(): Promise<ShowcaseMedia[]> {
@@ -766,13 +772,26 @@ class PhotosService {
     // Originals, plus whichever renditions already exist. Listing the rendition
     // prefixes (2 cheap calls, cached) lets us point at them only when they're
     // really there — no 404-then-fallback per image.
-    const [keys, thumbKeys, displayKeys] = await Promise.all([
-      this.listAllKeys(prefix),
+    const [objects, thumbKeys, displayKeys] = await Promise.all([
+      this.listAllObjects(prefix),
       this.listAllKeys(`thumbnails/${prefix}`),
       this.listAllKeys(`display/${prefix}`),
     ]);
 
-    if (keys.length === 0) return [];
+    if (objects.length === 0) return [];
+
+    // Identical bytes = identical ETag. A file copied into a story folder but
+    // left in the root would otherwise appear twice in the grid; keep the copy
+    // that sits deepest so it keeps its story.
+    const storyDepth = (key: string) => (key.slice(prefix.length).includes('/') ? 1 : 0);
+    const byEtag = new Map<string, string>();
+    for (const obj of objects) {
+      const kept = byEtag.get(obj.etag);
+      if (!kept || storyDepth(obj.key) > storyDepth(kept)) byEtag.set(obj.etag, obj.key);
+    }
+    const keys = Array.from(byEtag.values());
+    const dropped = objects.length - keys.length;
+    if (dropped > 0) logger.debug(`Showcase: dropped ${dropped} duplicate object(s)`);
 
     const thumbSet = new Set(thumbKeys);
     const displaySet = new Set(displayKeys);
