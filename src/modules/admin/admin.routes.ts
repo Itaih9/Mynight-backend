@@ -15,6 +15,11 @@ router.post('/login', loginBruteForceLimiter, adminController.login);
 router.post('/verify-otp', loginBruteForceLimiter, adminController.verifyOtp);
 router.post('/change-password', adminProtect, adminController.changePassword);
 
+router.get('/admins', adminProtect, adminController.listAdmins);
+router.post('/admins', adminProtect, adminController.createAdmin);
+router.patch('/admins/:adminId/active', adminProtect, adminController.setAdminActive);
+router.delete('/admins/:adminId', adminProtect, adminController.deleteAdmin);
+
 router.get('/dashboard', adminProtect, adminController.getDashboard);
 router.get('/pending-counts', adminProtect, adminController.getPendingCounts);
 router.get('/users', adminProtect, adminController.getUsers);

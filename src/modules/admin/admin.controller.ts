@@ -49,6 +49,48 @@ export class AdminController {
     }
   }
 
+  async listAdmins(_req: Request, res: Response, next: NextFunction) {
+    try {
+      const admins = await adminService.listAdmins();
+      res.json({ success: true, data: admins });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async createAdmin(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { email, password, name } = req.body;
+      const admin = await adminService.createAdmin({ email, password, name });
+      res.status(201).json({ success: true, data: admin });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async setAdminActive(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { adminId } = req.params;
+      const { isActive } = req.body;
+      const actingAdminId = (req as any).adminId as string;
+      const admin = await adminService.setAdminActive(adminId, !!isActive, actingAdminId);
+      res.json({ success: true, data: admin });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async deleteAdmin(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { adminId } = req.params;
+      const actingAdminId = (req as any).adminId as string;
+      const result = await adminService.deleteAdmin(adminId, actingAdminId);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async resetUserPassword(req: Request, res: Response, next: NextFunction) {
     try {
       const { userId } = req.params;

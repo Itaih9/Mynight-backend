@@ -119,6 +119,83 @@ class AdminService {
     }
   }
 
+  async listAdmins() {
+    return Admin.find()
+      .select('_id email name isActive createdAt')
+      .sort({ createdAt: 1 })
+      .lean();
+  }
+
+  async createAdmin(data: { email: string; password: string; name: string }) {
+    const email = (data.email || '').toLowerCase().trim();
+    if (!email || !email.includes('@')) {
+      throw new ValidationError('A valid email is required');
+    }
+    if (!data.name?.trim()) {
+      throw new ValidationError('Name is required');
+    }
+    if (!data.password || data.password.length < 8) {
+      throw new ValidationError('Password must be at least 8 characters');
+    }
+
+    const existing = await Admin.findOne({ email });
+    if (existing) {
+      throw new ValidationError('An admin with that email already exists');
+    }
+
+    // The model's pre-save hook hashes the password.
+    const admin = await Admin.create({ email, password: data.password, name: data.name.trim() });
+    logger.info(`Admin created: ${admin.email}`);
+
+    return { _id: admin._id, email: admin.email, name: admin.name, isActive: admin.isActive, createdAt: admin.createdAt };
+  }
+
+  async setAdminActive(adminId: string, isActive: boolean, actingAdminId: string) {
+    if (adminId === actingAdminId && !isActive) {
+      throw new ValidationError('You cannot deactivate yourself');
+    }
+
+    const admin = await Admin.findById(adminId);
+    if (!admin) {
+      throw new NotFoundError('Admin');
+    }
+
+    // Never leave the panel with no way in.
+    if (!isActive) {
+      const activeCount = await Admin.countDocuments({ isActive: true });
+      if (activeCount <= 1) {
+        throw new ValidationError('Cannot deactivate the last active admin');
+      }
+    }
+
+    admin.isActive = isActive;
+    await admin.save();
+    logger.info(`Admin ${admin.email} ${isActive ? 'activated' : 'deactivated'}`);
+
+    return { _id: admin._id, email: admin.email, name: admin.name, isActive: admin.isActive };
+  }
+
+  async deleteAdmin(adminId: string, actingAdminId: string) {
+    if (adminId === actingAdminId) {
+      throw new ValidationError('You cannot delete yourself');
+    }
+
+    const admin = await Admin.findById(adminId);
+    if (!admin) {
+      throw new NotFoundError('Admin');
+    }
+
+    const activeCount = await Admin.countDocuments({ isActive: true });
+    if (admin.isActive && activeCount <= 1) {
+      throw new ValidationError('Cannot delete the last active admin');
+    }
+
+    await admin.deleteOne();
+    logger.info(`Admin deleted: ${admin.email}`);
+
+    return { deleted: true };
+  }
+
   async getUsers(page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
 
