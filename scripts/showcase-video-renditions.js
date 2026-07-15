@@ -46,6 +46,21 @@ async function listAll(prefix) {
   return keys;
 }
 
+/**
+ * Stream an object to disk. Buffering it (getObject().promise()) pulls the whole
+ * file into RAM — a large clip gets the process OOM-killed on this box.
+ */
+function download(key, dest) {
+  return new Promise((resolve, reject) => {
+    const read = s3.getObject({ Bucket: BUCKET, Key: key }).createReadStream();
+    const write = fs.createWriteStream(dest);
+    read.on('error', reject);
+    write.on('error', reject);
+    write.on('finish', resolve);
+    read.pipe(write);
+  });
+}
+
 function poster(src, dest) {
   // Seek a second in — frame 0 is often a fade-in or a black leader.
   try {
@@ -80,16 +95,16 @@ function poster(src, dest) {
     }
 
     const src = path.join(tmp, `in${path.extname(key)}`);
-    const obj = await s3.getObject({ Bucket: BUCKET, Key: key }).promise();
-    fs.writeFileSync(src, obj.Body);
+    await download(key, src);
+    const srcBytes = fs.statSync(src).size;
 
     if (needPoster) {
       const jpg = path.join(tmp, 'poster.jpg');
       poster(src, jpg);
-      await s3.putObject({
+      await s3.upload({
         Bucket: BUCKET,
         Key: `thumbnails/${key}`,
-        Body: fs.readFileSync(jpg),
+        Body: fs.createReadStream(jpg),
         ContentType: 'image/jpeg',
         CacheControl: 'public, max-age=31536000',
       }).promise();
@@ -102,14 +117,14 @@ function poster(src, dest) {
       execFileSync('ffmpeg', ['-y', '-i', src, '-vf', 'scale=-2:720',
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26',
         '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', out], { stdio: 'ignore' });
-      await s3.putObject({
+      await s3.upload({
         Bucket: BUCKET,
         Key: `display/${key}`,
-        Body: fs.readFileSync(out),
+        Body: fs.createReadStream(out),
         ContentType: 'video/mp4',
         CacheControl: 'public, max-age=31536000',
       }).promise();
-      const before = (obj.Body.length / 1e6).toFixed(1);
+      const before = (srcBytes / 1e6).toFixed(1);
       const after = (fs.statSync(out).size / 1e6).toFixed(1);
       console.log(`display  ${key}  ${before}MB -> ${after}MB`);
       fs.unlinkSync(out);

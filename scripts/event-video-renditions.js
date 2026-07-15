@@ -40,6 +40,21 @@ AWS.config.update({
 });
 const s3 = new AWS.S3();
 
+/**
+ * Stream an object to disk. Buffering it (getObject().promise()) pulls the whole
+ * file into RAM — a 380MB clip gets the process OOM-killed on this box.
+ */
+function download(key, dest) {
+  return new Promise((resolve, reject) => {
+    const read = s3.getObject({ Bucket: BUCKET, Key: key }).createReadStream();
+    const write = fs.createWriteStream(dest);
+    read.on('error', reject);
+    write.on('error', reject);
+    write.on('finish', resolve);
+    read.pipe(write);
+  });
+}
+
 async function exists(key) {
   try {
     await s3.headObject({ Bucket: BUCKET, Key: key }).promise();
@@ -109,17 +124,17 @@ function poster(src, dest) {
 
     const src = path.join(tmp, `in${path.extname(key) || '.mp4'}`);
     try {
-      const obj = await s3.getObject({ Bucket: BUCKET, Key: key }).promise();
-      fs.writeFileSync(src, obj.Body);
+      await download(key, src);
+      const srcBytes = fs.statSync(src).size;
 
       if (needPoster) {
         const jpg = path.join(tmp, 'poster.jpg');
         if (!hasPoster) {
           poster(src, jpg);
-          await s3.putObject({
+          await s3.upload({
             Bucket: BUCKET,
             Key: posterKey,
-            Body: fs.readFileSync(jpg),
+            Body: fs.createReadStream(jpg),
             ContentType: 'image/jpeg',
             CacheControl: 'public, max-age=31536000',
           }).promise();
@@ -139,14 +154,14 @@ function poster(src, dest) {
         execFileSync('ffmpeg', ['-y', '-i', src, '-vf', 'scale=-2:720',
           '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26',
           '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', out], { stdio: 'ignore' });
-        await s3.putObject({
+        await s3.upload({
           Bucket: BUCKET,
           Key: displayKey,
-          Body: fs.readFileSync(out),
+          Body: fs.createReadStream(out),
           ContentType: 'video/mp4',
           CacheControl: 'public, max-age=31536000',
         }).promise();
-        const before = (obj.Body.length / 1e6).toFixed(1);
+        const before = (srcBytes / 1e6).toFixed(1);
         const after = (fs.statSync(out).size / 1e6).toFixed(1);
         process.stdout.write(`display ${before}MB -> ${after}MB `);
         fs.unlinkSync(out);
