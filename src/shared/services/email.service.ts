@@ -3,12 +3,25 @@ import { ses } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
 import logger from '@/shared/utils/logger';
 import { AppError } from '@/shared/utils/errors';
+import { buildIcs, googleCalendarUrl, type CalendarEvent } from '@/shared/utils/calendar';
+
+interface EmailAttachment {
+  filename: string;
+  content: string;
+  type: string;
+}
 
 interface SendEmailParams {
   to: string;
   subject: string;
   htmlBody: string;
   textBody?: string;
+  /**
+   * SendGrid only. The SES fallback uses sendEmail, which has no attachment
+   * support (that needs sendRawEmail + hand-built MIME), so attachments are
+   * dropped there — mails that attach anything must also work without it.
+   */
+  attachments?: EmailAttachment[];
 }
 
 const SENDGRID_ENABLED = Boolean(env.SENDGRID_API_KEY && env.SENDGRID_FROM_EMAIL);
@@ -101,7 +114,7 @@ class EmailService {
   private fromEmail = SENDGRID_ENABLED ? env.SENDGRID_FROM_EMAIL! : env.SES_EMAIL_FROM;
   private fromName = env.SENDGRID_FROM_NAME || BRAND.name;
 
-  async sendEmail({ to, subject, htmlBody, textBody }: SendEmailParams): Promise<void> {
+  async sendEmail({ to, subject, htmlBody, textBody, attachments }: SendEmailParams): Promise<void> {
     if (SENDGRID_ENABLED) {
       try {
         await sgMail.send({
@@ -110,6 +123,16 @@ class EmailService {
           subject,
           html: htmlBody,
           text: textBody || htmlBody.replace(/<[^>]*>/g, ''),
+          ...(attachments?.length
+            ? {
+                attachments: attachments.map((a) => ({
+                  filename: a.filename,
+                  content: Buffer.from(a.content, 'utf-8').toString('base64'),
+                  type: a.type,
+                  disposition: 'attachment',
+                })),
+              }
+            : {}),
         });
         logger.info(`Email sent to ${to} via SendGrid: ${subject}`);
         return;
@@ -202,6 +225,88 @@ class EmailService {
       to,
       subject,
       htmlBody: renderLayout({ preheader: `Find yourself in the ${eventName} photos`, body }),
+    });
+  }
+
+  /**
+   * Sent when a couple creates their event. Carries two calendar reminders:
+   * a week before the wedding (share the guest link) and the day after
+   * (send the links out). Both as one .ics and as Google Calendar links, since
+   * neither covers everyone on its own.
+   */
+  async sendEventCreatedEmail(
+    to: string,
+    opts: { eventName: string; eventCode: string; weddingDate: Date }
+  ): Promise<void> {
+    const { eventName, eventCode, weddingDate } = opts;
+    const guestUrl = `${env.FRONTEND_URL}/guest/${eventCode}/selfie`;
+    const galleryUrl = `${env.FRONTEND_URL}/gallery/${eventCode}`;
+
+    const weekBefore = new Date(weddingDate);
+    weekBefore.setDate(weekBefore.getDate() - 7);
+    const dayAfter = new Date(weddingDate);
+    dayAfter.setDate(dayAfter.getDate() + 1);
+
+    const reminders: CalendarEvent[] = [];
+    // An event created less than a week out would otherwise get a reminder
+    // dated in the past.
+    if (weekBefore.getTime() > Date.now()) {
+      reminders.push({
+        uid: `mynight-${eventCode}-before@mynight.co.il`,
+        title: `שבוע לחתונה — שתפו את הקישור לאורחים (${eventName})`,
+        description: 'שתפו את הקישור עם האורחים כדי שיוכלו להעלות ולמצוא את הצילומים שלהם.',
+        date: weekBefore,
+        url: guestUrl,
+      });
+    }
+    reminders.push({
+      uid: `mynight-${eventCode}-after@mynight.co.il`,
+      title: `שלחו לאורחים את הקישור לצילומים (${eventName})`,
+      description: 'החתונה מאחוריכם — שלחו לאורחים את הקישור כדי שימצאו את עצמם בצילומים.',
+      date: dayAfter,
+      url: guestUrl,
+    });
+
+    const dateFmt = (d: Date) => d.toLocaleDateString('he-IL', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    const reminderRows = reminders
+      .map(
+        (r) => `
+      <tr>
+        <td style="padding:14px 0;border-bottom:1px solid ${BRAND.border};">
+          <div style="font-size:15px;font-weight:700;color:${BRAND.primary};">${r.title}</div>
+          <div style="font-size:13px;color:${BRAND.muted};margin-top:4px;">${dateFmt(r.date)}</div>
+          <a href="${googleCalendarUrl(r)}" target="_blank" style="display:inline-block;margin-top:8px;font-size:13px;color:${BRAND.accentDark};text-decoration:underline;">הוספה ליומן Google</a>
+        </td>
+      </tr>`
+      )
+      .join('');
+
+    const body = `
+      <h1 style="margin:0 0 12px 0;font-size:24px;font-weight:700;color:${BRAND.primary};">האירוע ${eventName} נוצר בהצלחה</h1>
+      <p style="margin:0 0 24px 0;font-size:15px;line-height:1.7;color:${BRAND.text};">הכול מוכן. זה הקישור שהאורחים שלכם ישתמשו בו כדי להעלות צילומים ולמצוא את עצמם:</p>
+      <div style="background:${BRAND.bg};border:1px solid ${BRAND.border};border-radius:12px;padding:22px;text-align:center;margin:24px 0;">
+        <p style="margin:0 0 8px 0;font-size:12px;font-weight:700;color:${BRAND.muted};letter-spacing:1.2px;">קוד האירוע</p>
+        <div style="font-size:28px;font-weight:800;letter-spacing:6px;color:${BRAND.primary};font-family:'Courier New',monospace;" dir="ltr">${eventCode}</div>
+      </div>
+      ${button(guestUrl, 'הקישור לאורחים')}
+      <p style="margin:32px 0 8px 0;font-size:15px;font-weight:700;color:${BRAND.primary};">תזכורות ליומן</p>
+      <p style="margin:0 0 8px 0;font-size:14px;line-height:1.7;color:${BRAND.text};">צירפנו קובץ יומן למייל הזה — פתיחה שלו תוסיף את שתי התזכורות בבת אחת. אפשר גם להוסיף כל אחת בנפרד:</p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">${reminderRows}</table>
+      <p style="margin:24px 0 0 0;font-size:13px;color:${BRAND.muted};">הגלריה שלכם: <a href="${galleryUrl}" style="color:${BRAND.accentDark};text-decoration:underline;" dir="ltr">${galleryUrl}</a></p>
+    `;
+
+    await this.sendEmail({
+      to,
+      subject: `האירוע ${eventName} נוצר — הקישור לאורחים ותזכורות ליומן`,
+      htmlBody: renderLayout({ preheader: `הקישור לאורחים ותזכורות ליומן עבור ${eventName}`, body, dir: 'rtl' }),
+      attachments: [
+        {
+          filename: 'mynight-reminders.ics',
+          content: buildIcs(reminders),
+          type: 'text/calendar',
+        },
+      ],
     });
   }
 

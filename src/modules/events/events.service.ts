@@ -87,8 +87,32 @@ class EventsService {
     logger.info(`Event created with slug: ${slug} (code: ${eventCode}) by user ${userId}`);
 
     await this.ensureGiftCoupon(String(event._id));
+    await this.sendCreationEmail(userId, event);
 
     return event;
+  }
+
+  // Guest link + calendar reminders for the couple. Never let a mail failure
+  // abort event creation — the event is the thing that matters.
+  private async sendCreationEmail(userId: string, event: IEvent): Promise<void> {
+    try {
+      if (!event.weddingDate) return;
+
+      const user = await User.findById(userId).select('email').lean();
+      if (!user?.email) {
+        logger.warn(`No email for user ${userId}; skipping event creation email`);
+        return;
+      }
+
+      const { emailService } = await import('@/shared/services/email.service');
+      await emailService.sendEventCreatedEmail(user.email, {
+        eventName: event.name,
+        eventCode: event.eventCode,
+        weddingDate: event.weddingDate,
+      });
+    } catch (err) {
+      logger.error(`Event creation email failed for ${event.eventCode}: ${(err as Error).message}`);
+    }
   }
 
   async getEvent(eventId: string): Promise<IEvent> {
