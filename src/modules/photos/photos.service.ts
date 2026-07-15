@@ -343,8 +343,12 @@ class PhotosService {
 
 
   async getEventStoryGroups(eventId: string): Promise<{ uploaderName: string; items: any[] }[]> {
+    // Deliberately no indexedFaces: the story viewer never renders face circles
+    // (only the grid lightbox and the face overlay do), and on a big event the
+    // face data is several MB — enough to stall the stories request long enough
+    // that the gallery falls back to page 1 and shows a single ring.
     const photos = await Photo.find({ eventId })
-      .select('_id s3Key thumbnailUrl posterUrl category indexedFaces uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height')
+      .select('_id s3Key thumbnailUrl posterUrl category uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height')
       .sort({ createdAt: 1 })
       .lean();
 
@@ -353,13 +357,11 @@ class PhotosService {
       const name = p.uploaderName || (p.uploadedBy === 'guest' ? 'אורח' : 'צלם האירוע');
       const item = {
         _id: p._id,
-        s3Key: p.s3Key,
         url: `${env.CLOUDFRONT_URL}/${p.s3Key}`,
         thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${p.s3Key}`,
         displayUrl: displayUrlFor(p.s3Key, p.metadata?.mimeType),
         posterUrl: p.posterUrl,
         category: p.category ?? null,
-        indexedFaces: (p as any).indexedFaces ?? [],
         uploaderName: name,
         uploadedBy: p.uploadedBy,
         createdAt: p.createdAt,
