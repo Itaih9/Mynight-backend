@@ -49,6 +49,7 @@ router.get('/download-url/:id', photosController.getDownloadUrl);
 router.post('/download-zip', photosController.downloadPhotosZip);
 
 router.get('/showcase/images', photosController.getShowcaseImages);
+router.get('/showcase/faces/:faceId', photosController.getShowcaseFacePhotos);
 
 router.delete('/:id', protect, photosController.deletePhoto);
 

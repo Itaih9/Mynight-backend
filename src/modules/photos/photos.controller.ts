@@ -232,6 +232,17 @@ export class PhotosController {
       next(error);
     }
   }
+
+  async getShowcaseFacePhotos(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { faceId } = req.params;
+      const photos = await photosService.getShowcaseFacePhotos(faceId);
+      res.set('Cache-Control', 'public, max-age=300');
+      res.json({ success: true, data: photos });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const photosController = new PhotosController();

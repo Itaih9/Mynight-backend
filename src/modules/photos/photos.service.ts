@@ -89,6 +89,18 @@ export function categoryFromPath(path?: string | null): string | null {
   return normalizeCategory(segments[0]);
 }
 
+export interface ShowcaseFace {
+  faceId: string;
+  boundingBox: { Width: number; Height: number; Left: number; Top: number };
+}
+
+/** key -> faces, as written to gallery_showcase/_faces.json by the index script. */
+export type ShowcaseFaceManifest = Record<string, ShowcaseFace[]>;
+
+export const SHOWCASE_PREFIX = 'gallery_showcase/';
+export const SHOWCASE_FACE_MANIFEST_KEY = 'gallery_showcase/_faces.json';
+export const SHOWCASE_COLLECTION_ID = 'gallery-showcase';
+
 export interface ShowcaseMedia {
   url: string;
   /** Small rendition, when one exists at thumbnails/{key} (else undefined). */
@@ -98,11 +110,14 @@ export interface ShowcaseMedia {
   type: 'photo' | 'video';
   /** Subfolder under gallery_showcase/ (= story name), or null for grid-only. */
   story: string | null;
+  /** Faces detected in this photo (from the manifest), for the face circles. */
+  indexedFaces?: ShowcaseFace[];
 }
 
 class PhotosService {
   private showcaseImageCache: ShowcaseMedia[] | null = null;
   private cacheExpiry: number = 0;
+  private faceManifestCache: { data: ShowcaseFaceManifest; expiresAt: number } | null = null;
   private shuffledIdCache = new Map<string, { ids: string[]; total: number; expiresAt: number }>();
   private pendingVideoPosters = new Map<string, { posterUrl: string; expiresAt: number }>();
 
@@ -768,17 +783,21 @@ class PhotosService {
     }
 
     logger.debug('Fetching showcase media from S3');
-    const prefix = 'gallery_showcase/';
+    const prefix = SHOWCASE_PREFIX;
     const videoExt = /\.(mp4|mov|webm|m4v)$/i;
 
     // Originals, plus whichever renditions already exist. Listing the rendition
     // prefixes (2 cheap calls, cached) lets us point at them only when they're
     // really there — no 404-then-fallback per image.
-    const [objects, thumbKeys, displayKeys] = await Promise.all([
+    const [allObjects, thumbKeys, displayKeys, faceManifest] = await Promise.all([
       this.listAllObjects(prefix),
       this.listAllKeys(`thumbnails/${prefix}`),
       this.listAllKeys(`display/${prefix}`),
+      this.loadShowcaseFaceManifest(),
     ]);
+
+    // The face manifest lives under the same prefix — it's data, not an image.
+    const objects = allObjects.filter((o) => o.key !== SHOWCASE_FACE_MANIFEST_KEY);
 
     if (objects.length === 0) return [];
 
@@ -810,12 +829,14 @@ class PhotosService {
         const type: 'photo' | 'video' = videoExt.test(key) ? 'video' : 'photo';
         const thumbKey = `thumbnails/${key}`;
         const displayKey = `display/${key}`;
+        const faces = faceManifest[key];
         return {
           url: cdn(key),
           thumbnailUrl: thumbSet.has(thumbKey) ? cdn(thumbKey) : undefined,
           displayUrl: displaySet.has(displayKey) ? cdn(displayKey) : undefined,
           type,
           story,
+          ...(faces?.length ? { indexedFaces: faces } : {}),
         };
       });
 
@@ -825,6 +846,64 @@ class PhotosService {
     logger.debug(`Cached ${media.length} showcase media (${withThumbs} with thumbnails)`);
 
     return media;
+  }
+
+  /**
+   * The key -> faces map written by scripts/showcase-index-faces.js. Absent
+   * until that script has run, in which case the showcase simply has no face
+   * circles. Cached on the same TTL as the media listing.
+   */
+  private async loadShowcaseFaceManifest(): Promise<ShowcaseFaceManifest> {
+    const now = Date.now();
+    if (this.faceManifestCache && this.faceManifestCache.expiresAt > now) {
+      return this.faceManifestCache.data;
+    }
+    let data: ShowcaseFaceManifest = {};
+    try {
+      const obj = await s3
+        .getObject({ Bucket: env.S3_BUCKET_NAME, Key: SHOWCASE_FACE_MANIFEST_KEY })
+        .promise();
+      if (obj.Body) data = JSON.parse(obj.Body.toString('utf-8'));
+    } catch (err: any) {
+      if (err.code !== 'NoSuchKey') {
+        logger.warn(`Showcase face manifest unreadable: ${err.message}`);
+      }
+    }
+    this.faceManifestCache = { data, expiresAt: now + SHOWCASE_CACHE_TTL };
+    return data;
+  }
+
+  /**
+   * Every showcase photo containing the tapped person. A Rekognition FaceId is
+   * unique per detected face, so we search the showcase collection for the same
+   * person, collect all their face ids, then return every media item whose
+   * manifest faces include one of them.
+   */
+  async getShowcaseFacePhotos(faceId: string): Promise<ShowcaseMedia[]> {
+    const matchedFaceIds = new Set<string>([faceId]);
+    const matches = await rekognitionService.searchByFaceId({
+      collectionId: SHOWCASE_COLLECTION_ID,
+      faceId,
+    });
+    for (const m of matches) matchedFaceIds.add(m.faceId);
+
+    const [media, manifest] = await Promise.all([
+      this.getShowcaseImages(),
+      this.loadShowcaseFaceManifest(),
+    ]);
+
+    // manifest keys are S3 keys; media items are keyed only by their CDN url.
+    // Match on the encoded key tail so we don't re-derive keys here.
+    const keysWithPerson = new Set(
+      Object.entries(manifest)
+        .filter(([, faces]) => faces.some((f) => matchedFaceIds.has(f.faceId)))
+        .map(([key]) => key)
+    );
+
+    const encode = (key: string) => key.split('/').map(encodeURIComponent).join('/');
+    const wanted = new Set(Array.from(keysWithPerson).map((k) => `${env.CLOUDFRONT_URL}/${encode(k)}`));
+
+    return media.filter((m) => wanted.has(m.url));
   }
 }
 
