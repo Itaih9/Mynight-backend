@@ -22,8 +22,8 @@ class CouponController {
 
   async validate(req: Request, res: Response, next: NextFunction) {
     try {
-      const { code } = req.body;
-      const result = await couponService.validate(code);
+      const { code, packageName } = req.body;
+      const result = await couponService.validate(code, packageName);
       res.json({
         success: true,
         data: result,

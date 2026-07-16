@@ -375,6 +375,7 @@ class AdminService {
     expiresAt?: Date;
     affiliateId?: string;
     ownerEventId?: string;
+    packageName?: string;
   }) {
     const existing = await Coupon.findOne({ code: data.code.toUpperCase() });
     if (existing) {
@@ -413,6 +414,7 @@ class AdminService {
       isActive: true,
       affiliateId: data.affiliateId,
       ownerEventId: data.ownerEventId || undefined,
+      packageName: data.packageName || undefined,
       type: data.affiliateId ? 'affiliate' : 'standard',
     });
 

@@ -18,6 +18,7 @@ interface CreateCouponData {
   expiresAt?: Date;
   affiliateId?: string;
   type?: 'standard' | 'affiliate' | 'prepaid';
+  packageName?: string;
 }
 
 interface EventCouponDefaultsInput {
@@ -57,13 +58,14 @@ class CouponService {
       createdBy: userId,
       affiliateId: data.affiliateId,
       type: data.type || (data.affiliateId ? 'affiliate' : 'standard'),
+      packageName: data.packageName || undefined,
     });
 
     logger.info(`Coupon created: ${coupon.code} (${coupon.type}) with ${coupon.discountPercent}% discount`);
     return coupon;
   }
 
-  async validate(code: string): Promise<ValidateCouponResult> {
+  async validate(code: string, packageName?: string): Promise<ValidateCouponResult> {
     const coupon = await Coupon.findOne({ code: code.toUpperCase() });
 
     if (!coupon) {
@@ -72,6 +74,11 @@ class CouponService {
 
     if (!coupon.isActive) {
       return { valid: false, message: 'Coupon is no longer active' };
+    }
+
+    // Package-restricted coupon: only valid for its package.
+    if (coupon.packageName && coupon.packageName !== packageName) {
+      return { valid: false, message: 'הקופון תקף לחבילה אחרת בלבד' };
     }
 
     if (coupon.expiresAt && coupon.expiresAt < new Date()) {
