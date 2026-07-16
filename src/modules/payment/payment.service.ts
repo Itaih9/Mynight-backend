@@ -15,15 +15,48 @@ const SUMIT_CHARGE_URL = 'https://api.sumit.co.il/billing/payments/charge/';
 const SUMIT_BEGIN_REDIRECT_URL = 'https://api.sumit.co.il/creditguy/gateway/beginredirect/';
 const SUMIT_GET_TRANSACTION_URL = 'https://api.sumit.co.il/creditguy/gateway/gettransaction/';
 
-async function sendPaymentEmail(userId: string, eventId: string, amount: number) {
+// On payment, notify the admin only. The couple's single email is the Hebrew
+// welcome sent at signup — no receipt is sent to them here.
+async function notifyAdminOfPayment(payment: IPayment) {
   try {
-    const user = await User.findById(userId).select('email').lean();
-    if (!user?.email) return;
-    const event = await Event.findById(eventId).select('name').lean();
+    const [user, event] = await Promise.all([
+      User.findById(payment.userId).lean(),
+      Event.findById(payment.eventId).lean(),
+    ]);
+
+    const coupleName =
+      [user?.partnerName1, user?.partnerName2].filter(Boolean).join(' & ') ||
+      user?.name ||
+      'Unknown couple';
+
+    // A referral is expressed through an affiliate/prepaid coupon.
+    let affiliateName: string | undefined;
+    const couponCode: string | undefined = payment.metadata?.couponCode;
+    if (couponCode) {
+      const coupon = await Coupon.findOne({ code: couponCode.toUpperCase() });
+      if (coupon?.affiliateId && (coupon.type === 'affiliate' || coupon.type === 'prepaid')) {
+        const affiliate = await Affiliate.findById(coupon.affiliateId).lean();
+        affiliateName = affiliate?.name || affiliate?.email;
+      }
+    }
+
     const { emailService } = await import('@/shared/services/email.service');
-    await emailService.sendPaymentConfirmationEmail(user.email, event?.name || 'your event', amount);
+    await emailService.sendPaymentAdminNotification({
+      coupleName,
+      eventCode: event?.eventCode || String(payment.eventId),
+      packageName: event?.packageName,
+      weddingDate: event?.weddingDate,
+      amountPaid: payment.amount,
+      originalAmount: payment.originalAmount,
+      discountAmount: payment.discountAmount,
+      couponCode,
+      discountPercent: payment.metadata?.discountPercent,
+      affiliateName,
+      contactEmail: user?.email,
+      contactPhone: user?.phoneNumber,
+    });
   } catch (err: any) {
-    logger.warn(`Payment confirmation email failed for user ${userId}: ${err.message}`);
+    logger.warn(`Admin payment notification failed for payment ${payment._id}: ${err.message}`);
   }
 }
 
@@ -103,7 +136,7 @@ class PaymentService {
 
       logger.info(`Payment completed with 100% coupon: ${couponCode} for event ${eventId}`);
 
-      await sendPaymentEmail(userId, eventId, 0);
+      await notifyAdminOfPayment(payment);
 
       return {
         success: true,
@@ -281,7 +314,7 @@ class PaymentService {
 
         logger.info(`Sumit payment completed: ${payment._id}`);
 
-        await sendPaymentEmail(payment.userId.toString(), payment.eventId.toString(), payment.amount);
+        await notifyAdminOfPayment(payment);
       } else {
         payment.status = 'failed';
         await payment.save();
@@ -401,7 +434,7 @@ class PaymentService {
 
         logger.info(`Sumit redirect payment verified: ${payment._id}`);
 
-        await sendPaymentEmail(payment.userId.toString(), payment.eventId.toString(), payment.amount);
+        await notifyAdminOfPayment(payment);
 
         return { success: true, payment };
       }

@@ -24,6 +24,8 @@ interface EnvConfig {
   SENDGRID_API_KEY?: string;
   SENDGRID_FROM_EMAIL?: string;
   SENDGRID_FROM_NAME?: string;
+  // Where new-payment notifications are sent.
+  ADMIN_NOTIFY_EMAIL: string;
   SUMIT_COMPANY_ID: string;
   SUMIT_API_KEY: string;
   SUMIT_PUBLIC_KEY: string;
@@ -58,6 +60,7 @@ export const env: EnvConfig = {
   SENDGRID_API_KEY: process.env.SENDGRID_API_KEY,
   SENDGRID_FROM_EMAIL: process.env.SENDGRID_FROM_EMAIL,
   SENDGRID_FROM_NAME: process.env.SENDGRID_FROM_NAME,
+  ADMIN_NOTIFY_EMAIL: process.env.ADMIN_NOTIFY_EMAIL || 'itaih9@gmail.com',
   SUMIT_COMPANY_ID: getEnv('SUMIT_COMPANY_ID', ''),
   SUMIT_API_KEY: getEnv('SUMIT_API_KEY', ''),
   SUMIT_PUBLIC_KEY: getEnv('SUMIT_PUBLIC_KEY', ''),

@@ -184,27 +184,85 @@ class EmailService {
   }
 
   async sendWelcomeEmail(to: string, name?: string): Promise<void> {
-    const subject = `Welcome to ${BRAND.name}`;
-    const greeting = name ? `Welcome, ${name}` : `Welcome to ${BRAND.name}`;
+    const subject = `ברוכים הבאים ל-${BRAND.name} 🎉`;
+    const greeting = name ? `ברוכים הבאים, ${name}!` : `ברוכים הבאים ל-${BRAND.name}!`;
     const body = `
       <h1 style="margin:0 0 12px 0;font-size:24px;font-weight:700;color:${BRAND.primary};">${greeting}</h1>
-      <p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:${BRAND.text};">We are excited to have you on board. ${BRAND.name} makes it easy to collect every photo and video from your event in one place, and lets each guest find themselves with a single selfie.</p>
+      <p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:${BRAND.text};">אנחנו מתרגשים שאתם איתנו. מהרגע שהנעל נוגעת בכוס, אנחנו מתחילים לעבוד על האלבום המושלם שלכם!</p>
       <div style="background:${BRAND.bg};border-right:3px solid ${BRAND.accent};border-radius:8px;padding:18px 22px;margin:24px 0;">
-        <p style="margin:0 0 10px 0;font-size:13px;font-weight:700;color:${BRAND.primary};text-transform:uppercase;letter-spacing:0.8px;">Getting started</p>
-        <ul style="margin:0;padding-left:18px;font-size:14px;line-height:1.9;color:${BRAND.text};">
-          <li>Set up your event in the dashboard</li>
-          <li>Upload photos and videos from your gallery</li>
-          <li>Share the link with your guests over WhatsApp</li>
-          <li>Guests upload a selfie and instantly see their photos</li>
+        <p style="margin:0 0 10px 0;font-size:14px;font-weight:700;color:${BRAND.primary};">מה עכשיו?</p>
+        <ul style="margin:0;padding-right:18px;padding-left:0;font-size:14px;line-height:1.9;color:${BRAND.text};">
+          <li>הגדירו את הלינק האישי שלכם בלוח הבקרה</li>
+          <li>העלו את רשימת האורחים</li>
+          <li>אנחנו נטפל בכל השאר!</li>
         </ul>
       </div>
-      ${button(`${env.FRONTEND_URL}/upload`, 'Open your dashboard')}
-      <p style="margin:24px 0 0 0;font-size:14px;color:${BRAND.muted};">If you have any questions, just reply to this email.</p>
+      ${button(`${env.FRONTEND_URL}/login`, 'כניסה לחשבון')}
+      <p style="margin:24px 0 0 0;font-size:14px;color:${BRAND.muted};">יש שאלה? פשוט השיבו למייל הזה ונשמח לעזור.</p>
     `;
     await this.sendEmail({
       to,
       subject,
-      htmlBody: renderLayout({ preheader: `Welcome to ${BRAND.name}. Here is how to get started.`, body }),
+      htmlBody: renderLayout({ preheader: `ברוכים הבאים ל-${BRAND.name} — האלבום שלכם מתחיל כאן.`, body, dir: 'rtl' }),
+    });
+  }
+
+  /**
+   * Internal alert sent to ADMIN_NOTIFY_EMAIL when an event is paid for. Carries
+   * the amount, coupon and referral status; the couple never sees this.
+   */
+  async sendPaymentAdminNotification(opts: {
+    coupleName: string;
+    eventCode: string;
+    packageName?: string;
+    weddingDate?: Date;
+    amountPaid: number;
+    originalAmount?: number;
+    discountAmount?: number;
+    couponCode?: string;
+    discountPercent?: number;
+    affiliateName?: string;
+    contactEmail?: string;
+    contactPhone?: string;
+  }): Promise<void> {
+    const {
+      coupleName, eventCode, packageName, weddingDate, amountPaid,
+      originalAmount, discountAmount, couponCode, discountPercent, affiliateName,
+      contactEmail, contactPhone,
+    } = opts;
+
+    const row = (label: string, value: string) =>
+      `<tr><td style="padding:8px 0;font-size:14px;color:${BRAND.muted};white-space:nowrap;">${label}</td>
+        <td style="padding:8px 0 8px 16px;font-size:14px;font-weight:600;color:${BRAND.text};">${value}</td></tr>`;
+
+    const dateStr = weddingDate
+      ? weddingDate.toLocaleDateString('he-IL', { day: 'numeric', month: 'long', year: 'numeric' })
+      : '—';
+    const discounted = typeof discountAmount === 'number' && discountAmount > 0;
+    const couponLine = couponCode
+      ? `${couponCode}${discountPercent ? ` (${discountPercent}%–)` : ''}`
+      : 'ללא קופון';
+    const contact = [contactEmail, contactPhone].filter(Boolean).join(' · ') || '—';
+
+    const body = `
+      <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:${BRAND.primary};">תשלום חדש התקבל 🎉</h1>
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;margin-top:16px;border-collapse:collapse;">
+        ${row('הזוג', coupleName)}
+        ${row('קוד אירוע', eventCode)}
+        ${row('חבילה', packageName || '—')}
+        ${row('תאריך חתונה', dateStr)}
+        ${row('סכום ששולם', `₪${amountPaid}`)}
+        ${discounted ? row('מחיר מקורי', `<s style="color:${BRAND.muted};">₪${originalAmount}</s> · הנחה: ₪${discountAmount}`) : ''}
+        ${row('קופון', couponLine)}
+        ${row('שותף מפנה', affiliateName || 'אין שותף מפנה')}
+        ${row('פרטי קשר', contact)}
+      </table>
+    `;
+
+    await this.sendEmail({
+      to: env.ADMIN_NOTIFY_EMAIL,
+      subject: `💳 תשלום חדש — ${coupleName} (${eventCode})`,
+      htmlBody: renderLayout({ preheader: `₪${amountPaid} · ${coupleName}`, body, dir: 'rtl' }),
     });
   }
 
