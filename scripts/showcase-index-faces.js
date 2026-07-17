@@ -3,23 +3,31 @@
  * manifest to gallery_showcase/_faces.json, which getShowcaseImages() reads to
  * draw face circles and getShowcaseFacePhotos() reads to filter to one person.
  *
- * The collection (gallery-showcase) persists in Rekognition; the backend
- * searches it live when a bubble is tapped. Re-running rebuilds both from
- * scratch (collection is reset first) so the set stays in sync with S3.
+ * Resumable: the manifest is checkpointed to S3 every 50 photos and records
+ * every processed key (including zero-face ones), so a crashed or killed run
+ * picks up where it left off — just run it again. Because resuming keeps the
+ * existing Rekognition collection (its faceIds are in the checkpoint), the
+ * collection is only reset on a fresh start or with --fresh.
+ *
+ * Each Rekognition call is capped at 30s with 2 retries, so one bad file
+ * stalls a single photo, not the run.
  *
  * Cost: ~$0.001 per image indexed, one-off.
  *
  * Usage:   cd /home/ubuntu/mynight-back && node scripts/showcase-index-faces.js
  *          node scripts/showcase-index-faces.js --dry-run   # count only
+ *          node scripts/showcase-index-faces.js --fresh     # ignore checkpoint, full rebuild
  */
 require('dotenv').config();
 const AWS = require('aws-sdk');
 
 const DRY_RUN = process.argv.includes('--dry-run');
+const FRESH = process.argv.includes('--fresh');
 const BUCKET = process.env.S3_BUCKET_NAME;
 const PREFIX = 'gallery_showcase/';
 const MANIFEST_KEY = 'gallery_showcase/_faces.json';
 const COLLECTION_ID = 'gallery-showcase';
+const CHECKPOINT_EVERY = 50;
 const VIDEO_RE = /\.(mp4|mov|webm|m4v)$/i;
 // Rekognition only indexes JPEG/PNG.
 const IMAGE_RE = /\.(jpe?g|png)$/i;
@@ -30,7 +38,11 @@ AWS.config.update({
   region: process.env.AWS_REGION,
 });
 const s3 = new AWS.S3();
-const rekognition = new AWS.Rekognition();
+// Hard-capped so a single stuck call can't hang the whole run.
+const rekognition = new AWS.Rekognition({
+  httpOptions: { connectTimeout: 5000, timeout: 30000 },
+  maxRetries: 2,
+});
 
 async function listAllKeys(prefix) {
   const keys = [];
@@ -45,6 +57,27 @@ async function listAllKeys(prefix) {
     token = res.IsTruncated ? res.NextContinuationToken : undefined;
   } while (token);
   return keys;
+}
+
+async function loadCheckpoint() {
+  try {
+    const obj = await s3.getObject({ Bucket: BUCKET, Key: MANIFEST_KEY }).promise();
+    return JSON.parse(obj.Body.toString('utf-8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+async function saveManifest(manifest) {
+  await s3
+    .putObject({
+      Bucket: BUCKET,
+      Key: MANIFEST_KEY,
+      Body: JSON.stringify(manifest),
+      ContentType: 'application/json',
+      CacheControl: 'no-cache',
+    })
+    .promise();
 }
 
 async function resetCollection() {
@@ -68,14 +101,26 @@ async function resetCollection() {
     return;
   }
 
-  await resetCollection();
+  // Resume from the checkpoint unless a fresh rebuild was asked for. The
+  // checkpoint's faceIds live in the existing collection, so resuming must
+  // not reset it.
+  let manifest = FRESH ? null : await loadCheckpoint();
+  if (manifest && Object.keys(manifest).length > 0) {
+    console.log(`resuming: ${Object.keys(manifest).length} photo(s) already processed`);
+  } else {
+    manifest = {};
+    await resetCollection();
+  }
 
-  const manifest = {};
-  let indexed = 0;
+  let processed = 0;
   let faces = 0;
+  let failed = 0;
+  let sinceCheckpoint = 0;
 
   for (let i = 0; i < photos.length; i++) {
     const key = photos[i];
+    if (Object.prototype.hasOwnProperty.call(manifest, key)) continue;
+
     process.stdout.write(`[${i + 1}/${photos.length}] ${key.split('/').pop()} ... `);
     try {
       const res = await rekognition
@@ -100,28 +145,29 @@ async function resetCollection() {
         }))
         .filter((f) => f.faceId);
 
-      if (detected.length) {
-        manifest[key] = detected;
-        faces += detected.length;
-      }
-      indexed++;
+      // Record zero-face photos too, so a resume skips them.
+      manifest[key] = detected;
+      faces += detected.length;
+      processed++;
+      sinceCheckpoint++;
       console.log(`${detected.length} face(s)`);
     } catch (e) {
+      failed++;
       console.log(`FAILED: ${e.message}`);
+    }
+
+    if (sinceCheckpoint >= CHECKPOINT_EVERY) {
+      await saveManifest(manifest);
+      sinceCheckpoint = 0;
+      console.log(`-- checkpoint saved (${Object.keys(manifest).length} photos in manifest)`);
     }
   }
 
-  await s3
-    .putObject({
-      Bucket: BUCKET,
-      Key: MANIFEST_KEY,
-      Body: JSON.stringify(manifest),
-      ContentType: 'application/json',
-      CacheControl: 'no-cache',
-    })
-    .promise();
-
-  console.log(`done: ${indexed} indexed, ${faces} faces total, manifest -> ${MANIFEST_KEY}`);
+  await saveManifest(manifest);
+  console.log(
+    `done: ${processed} newly indexed, ${failed} failed, ` +
+      `${Object.keys(manifest).length} photos in manifest, ${faces} new faces, manifest -> ${MANIFEST_KEY}`
+  );
 })().catch((e) => {
   console.error(e);
   process.exit(1);
