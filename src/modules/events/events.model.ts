@@ -36,6 +36,9 @@ export interface IEvent extends Document {
   uploadExpiresAt?: Date;
   expiresAt: Date;
   weddingDate?: Date;
+  // Credited photographer for this event's pro photos (set by admin).
+  photographerName?: string;
+  photographerInstagram?: string;
   sharingPermissions: ISharingPermissions;
   guestListFile?: IGuestListFile;
   guestListUploadCount: number;
@@ -108,6 +111,14 @@ const eventSchema = new Schema<IEvent>(
     },
     weddingDate: {
       type: Date,
+    },
+    photographerName: {
+      type: String,
+      trim: true,
+    },
+    photographerInstagram: {
+      type: String,
+      trim: true,
     },
     sharingPermissions: {
       type: {

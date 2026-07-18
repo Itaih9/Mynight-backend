@@ -301,6 +301,20 @@ export class AdminController {
     }
   }
 
+  async updateEventPhotographer(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { eventId } = req.params;
+      const { photographerName, photographerInstagram } = req.body;
+      const result = await adminService.updateEventPhotographer(eventId, {
+        photographerName,
+        photographerInstagram,
+      });
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async downloadGuestList(req: Request, res: Response, next: NextFunction) {
     try {
       const { eventId } = req.params;

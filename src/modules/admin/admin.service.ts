@@ -543,6 +543,34 @@ class AdminService {
     };
   }
 
+  async updateEventPhotographer(
+    eventId: string,
+    data: { photographerName?: string; photographerInstagram?: string }
+  ) {
+    const event = await Event.findById(eventId);
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
+    // Store the IG handle bare (no @, no URL) so the frontend can build both the
+    // display (@handle) and the link (instagram.com/handle) from one value.
+    const handle = (data.photographerInstagram || '')
+      .trim()
+      .replace(/^@/, '')
+      .replace(/^https?:\/\/(www\.)?instagram\.com\//i, '')
+      .replace(/\/+$/, '')
+      .split(/[/?]/)[0];
+
+    event.photographerName = (data.photographerName || '').trim() || undefined;
+    event.photographerInstagram = handle || undefined;
+    await event.save();
+
+    return {
+      _id: event._id,
+      photographerName: event.photographerName,
+      photographerInstagram: event.photographerInstagram,
+    };
+  }
+
   async updateEventSlug(eventId: string, newSlug: string, resetCount: boolean = false) {
     const slug = newSlug.trim().toLowerCase();
     if (!/^[a-z0-9-]{3,}$/.test(slug)) {
