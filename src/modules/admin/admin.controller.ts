@@ -146,7 +146,9 @@ export class AdminController {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
-      const result = await adminService.getCoupons(page, limit);
+      const filterParam = req.query.filter as string;
+      const filter = (['mine', 'auto', 'all'].includes(filterParam) ? filterParam : 'mine') as 'mine' | 'auto' | 'all';
+      const result = await adminService.getCoupons(page, limit, filter);
       res.json({
         success: true,
         data: result,

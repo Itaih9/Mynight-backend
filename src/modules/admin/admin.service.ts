@@ -287,19 +287,29 @@ class AdminService {
     };
   }
 
-  async getCoupons(page: number = 1, limit: number = 20) {
+  async getCoupons(page: number = 1, limit: number = 20, filter: 'mine' | 'auto' | 'all' = 'mine') {
     const skip = (page - 1) * limit;
 
-    // Auto-generated per-event gift coupons are managed from the couple's slug
-    // menu, not this list.
+    // "mine" = coupons an admin created; "auto" = per-user/per-event coupons the
+    // system generates for couples. Default stays "mine" so the existing view is
+    // unchanged (it previously excluded only 'event').
+    const ADMIN_TYPES = ['standard', 'affiliate', 'prepaid'];
+    const AUTO_TYPES = ['personal', 'event'];
+    const query =
+      filter === 'auto'
+        ? { type: { $in: AUTO_TYPES } }
+        : filter === 'all'
+        ? {}
+        : { type: { $in: ADMIN_TYPES } };
+
     const [coupons, total] = await Promise.all([
-      Coupon.find({ type: { $ne: 'event' } })
+      Coupon.find(query)
         .select('-__v')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
-      Coupon.countDocuments({ type: { $ne: 'event' } }),
+      Coupon.countDocuments(query),
     ]);
 
     const ownerIds = Array.from(
