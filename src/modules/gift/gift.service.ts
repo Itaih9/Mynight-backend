@@ -20,12 +20,15 @@ interface CreateGiftInput {
   coupleName?: string;
   gifterEmail?: string;
   message?: string;
+  /** Promo coupon the gifter applies to their purchase (discounts what they pay). */
+  couponCode?: string;
 }
 
 class GiftService {
   async createGift(input: CreateGiftInput): Promise<{
     giftId: string;
     amount: number;
+    chargeAmount: number;
     publicKey?: string;
     companyId?: string;
   }> {
@@ -34,8 +37,24 @@ class GiftService {
       throw new ValidationError(`Gift amount must be between ${MIN_GIFT} and ${MAX_GIFT} ILS`);
     }
 
+    // A promo coupon reduces what the gifter pays; the couple still receives the
+    // full gift value. Validated against the gift's package (for full-package
+    // gifts) so package-restricted promos behave the same as at couple checkout.
+    let chargeAmount = amount;
+    let appliedCoupon: string | undefined;
+    if (input.couponCode) {
+      const res = await couponService.validate(input.couponCode, input.packageName);
+      if (!res.valid) throw new ValidationError(res.message || 'קופון לא תקין');
+      const fixed = res.discountAmount && res.discountAmount > 0 ? Math.min(res.discountAmount, amount) : 0;
+      const discount = fixed > 0 ? fixed : (amount * (res.discountPercent || 0)) / 100;
+      chargeAmount = Math.max(0, Math.round((amount - discount) * 100) / 100);
+      appliedCoupon = input.couponCode.toUpperCase();
+    }
+
     const gift = await Gift.create({
       amount,
+      chargeAmount,
+      appliedCoupon,
       packageName: input.packageName || undefined,
       coupleName: input.coupleName?.trim() || undefined,
       gifterEmail: input.gifterEmail?.trim() || undefined,
@@ -43,11 +62,12 @@ class GiftService {
       status: 'pending',
     });
 
-    logger.info(`Gift initiated: ${gift._id} for ₪${amount}${input.packageName ? ` (${input.packageName})` : ''}`);
+    logger.info(`Gift initiated: ${gift._id} value ₪${amount}, charge ₪${chargeAmount}${input.packageName ? ` (${input.packageName})` : ''}`);
 
     return {
       giftId: gift._id.toString(),
       amount,
+      chargeAmount,
       publicKey: env.SUMIT_PUBLIC_KEY,
       companyId: env.SUMIT_COMPANY_ID,
     };
@@ -83,12 +103,12 @@ class GiftService {
             Item: {
               Name: 'MyNight Gift',
               Description: 'MyNight Gift Card',
-              Price: gift.amount,
+              Price: gift.chargeAmount,
               Currency: 'ILS',
               SearchMode: 'Name',
             },
             Quantity: 1,
-            UnitPrice: gift.amount,
+            UnitPrice: gift.chargeAmount,
             Currency: 'ILS',
             Description: 'MyNight Gift Card',
           },
@@ -137,7 +157,7 @@ class GiftService {
     const response = await axios.post(SUMIT_BEGIN_REDIRECT_URL, {
       Credentials: { CompanyID: Number(env.SUMIT_COMPANY_ID), APIKey: env.SUMIT_API_KEY },
       Mode: 'Charge',
-      Amount: gift.amount,
+      Amount: gift.chargeAmount,
       Currency: 'ILS',
       Identifier: identifier,
       RedirectURL: returnUrl,
@@ -193,6 +213,15 @@ class GiftService {
     gift.status = 'paid';
     gift.paymentIntentId = paymentRef || gift.paymentIntentId;
     await gift.save();
+
+    // Consume the promo coupon the gifter used, so its max-uses count is honored.
+    if (gift.appliedCoupon) {
+      try {
+        await couponService.use(gift.appliedCoupon);
+      } catch (e: any) {
+        logger.warn(`Failed to consume gift promo coupon ${gift.appliedCoupon}: ${e.message}`);
+      }
+    }
 
     logger.info(`Gift ${gift._id} paid — coupon ${coupon.code}`);
 
