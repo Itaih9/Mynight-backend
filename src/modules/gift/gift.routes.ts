@@ -6,6 +6,8 @@ const router = Router();
 
 router.post('/create', giftController.create);
 router.post('/charge', giftController.charge);
+router.post('/begin-redirect', giftController.beginRedirect);
+router.post('/verify-redirect', giftController.verifyRedirect);
 router.get('/:code', giftController.getByCode);
 
 export default router;

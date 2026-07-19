@@ -11,6 +11,8 @@ export interface IGift extends Document {
   couponCode?: string;
   status: 'pending' | 'paid' | 'failed';
   paymentIntentId?: string;
+  /** Sumit redirect-flow transaction identifier. */
+  sumitIdentifier?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -25,6 +27,7 @@ const giftSchema = new Schema<IGift>(
     couponCode: { type: String, uppercase: true, trim: true },
     status: { type: String, enum: ['pending', 'paid', 'failed'], default: 'pending' },
     paymentIntentId: { type: String },
+    sumitIdentifier: { type: String },
   },
   { timestamps: true }
 );

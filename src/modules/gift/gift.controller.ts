@@ -22,6 +22,26 @@ export class GiftController {
     }
   }
 
+  async beginRedirect(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { giftId } = req.body;
+      const result = await giftService.beginGiftRedirect(giftId);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async verifyRedirect(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { giftId } = req.body;
+      const result = await giftService.verifyGiftRedirect(giftId);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getByCode(req: Request, res: Response, next: NextFunction) {
     try {
       const result = await giftService.getGiftByCode(req.params.code);
