@@ -175,6 +175,26 @@ class GiftService {
     return { redirectUrl };
   }
 
+  /**
+   * A gift fully covered by a promo coupon (chargeAmount 0) — no Sumit needed.
+   * Only completes when the server-computed charge is actually 0, so it can't
+   * be used to skip a real payment.
+   */
+  async completeFreeGift(giftId: string): Promise<{
+    couponCode: string;
+    amount: number;
+    coupleName?: string;
+    message?: string;
+  }> {
+    const gift = await Gift.findById(giftId);
+    if (!gift) throw new NotFoundError('Gift');
+    if (gift.status === 'paid' && gift.couponCode) {
+      return { couponCode: gift.couponCode, amount: gift.amount, coupleName: gift.coupleName, message: gift.message };
+    }
+    if (gift.chargeAmount > 0) throw new ValidationError('Gift requires payment');
+    return await this.finalizeGift(gift, 'free');
+  }
+
   /** Verifies the redirect transaction and mints the coupon on success. */
   async verifyGiftRedirect(giftId: string): Promise<{
     couponCode: string;
