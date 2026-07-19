@@ -1,0 +1,11 @@
+import { Router } from 'express';
+import { giftController } from './gift.controller';
+
+// All public — a gift is bought and redeemed without an account.
+const router = Router();
+
+router.post('/create', giftController.create);
+router.post('/charge', giftController.charge);
+router.get('/:code', giftController.getByCode);
+
+export default router;

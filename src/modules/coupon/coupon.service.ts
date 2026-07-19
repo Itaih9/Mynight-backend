@@ -247,6 +247,35 @@ class CouponService {
     return coupon;
   }
 
+  /**
+   * A one-time fixed-ILS coupon bought as a gift. packageName restricts it to a
+   * single package (a full-package gift lands the couple at ₪0); left empty it
+   * works on any package as a plain gift-card of `amount` ILS.
+   */
+  async createGiftCoupon(amount: number, packageName?: string): Promise<ICoupon> {
+    let code = '';
+    let attempts = 0;
+    while (attempts < 10) {
+      code = `GIFT-${giftCodeNano()}`;
+      const clash = await Coupon.findOne({ code });
+      if (!clash) break;
+      attempts++;
+    }
+    if (attempts >= 10) throw new Error('Failed to generate unique gift coupon code');
+
+    const coupon = await Coupon.create({
+      code,
+      discountPercent: 0,
+      discountAmount: amount,
+      maxUses: 1,
+      packageName: packageName || undefined,
+      type: 'gift',
+      isActive: true,
+    });
+    logger.info(`Gift coupon created: ${code} (₪${amount}${packageName ? `, ${packageName}` : ''})`);
+    return coupon;
+  }
+
   async getEventCoupon(eventId: string): Promise<ICoupon | null> {
     return Coupon.findOne({ ownerEventId: eventId, type: 'event' });
   }

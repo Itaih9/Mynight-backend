@@ -18,7 +18,7 @@ export interface ICoupon extends Document {
   // True once an event coupon has been individually edited, so bulk
   // "apply defaults to existing" leaves it alone.
   customized?: boolean;
-  type: 'standard' | 'affiliate' | 'prepaid' | 'personal' | 'event';
+  type: 'standard' | 'affiliate' | 'prepaid' | 'personal' | 'event' | 'gift';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -83,7 +83,7 @@ const couponSchema = new Schema<ICoupon>(
     },
     type: {
       type: String,
-      enum: ['standard', 'affiliate', 'prepaid', 'personal', 'event'],
+      enum: ['standard', 'affiliate', 'prepaid', 'personal', 'event', 'gift'],
       default: 'standard',
     },
   },

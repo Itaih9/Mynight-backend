@@ -10,6 +10,7 @@ import facesRoutes from './modules/faces/faces.routes';
 import paymentRoutes from './modules/payment/payment.routes';
 import affiliateRoutes from './modules/affiliate/affiliate.routes';
 import couponRoutes from './modules/coupon/coupon.routes';
+import giftRoutes from './modules/gift/gift.routes';
 import adminRoutes from './modules/admin/admin.routes';
 import contactRoutes from './modules/contact/contact.routes';
 import guestsRoutes from './modules/guests/guests.routes';
@@ -57,6 +58,7 @@ export const createApp = (): Application => {
   app.use('/api/payment', paymentRoutes);
   app.use('/api/affiliate', affiliateRoutes);
   app.use('/api/coupons', couponRoutes);
+  app.use('/api/gifts', giftRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/contact', contactRoutes);
   app.use('/api/guests', guestsRoutes);
