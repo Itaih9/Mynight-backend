@@ -6,6 +6,21 @@ import { AppError } from '@/shared/utils/errors';
 const DEFAULT_MATCH_THRESHOLD = 80;
 const DELETE_BATCH_SIZE = 100;
 
+// Wedding photo filter categories → the Rekognition DetectLabels names that map
+// to them. A photo gets a category if any of its labels appears at >= this
+// confidence. Values are the Hebrew names shown as gallery filter chips.
+const AI_CATEGORY_CONFIDENCE = 85;
+const AI_CATEGORY_LABELS: Record<string, string[]> = {
+  'ריקודים': ['Dancing', 'Dance Pose', 'Nightlife'],
+  'ילדים': ['Child', 'Baby', 'Boy', 'Girl', 'Toddler', 'Kid'],
+  'לחיים': ['Wine', 'Wine Glass', 'Beer', 'Glass', 'Alcohol', 'Drink', 'Cocktail', 'Bottle'],
+  'עוגה ואוכל': ['Cake', 'Dessert', 'Food', 'Meal', 'Birthday Cake', 'Torte', 'Plate'],
+  'צילום קבוצתי': ['Group', 'Crowd'],
+  'בחוץ': ['Outdoors', 'Garden', 'Nature', 'Lawn', 'Field', 'Grass', 'Park'],
+};
+
+export const AI_CATEGORIES = Object.keys(AI_CATEGORY_LABELS);
+
 export interface BoundingBox {
   Width: number;
   Height: number;
@@ -41,6 +56,33 @@ export interface FaceRecord {
 }
 
 class RekognitionService {
+  /**
+   * Detects wedding filter categories (dance, kids, drinks, cake, group,
+   * outdoor) for a photo via DetectLabels. Returns the matched Hebrew category
+   * names. Best-effort — never throws, so it can't break an upload.
+   */
+  async detectCategories(s3Key: string): Promise<string[]> {
+    try {
+      const result = await rekognition
+        .detectLabels({
+          Image: { S3Object: { Bucket: env.S3_BUCKET_NAME, Name: s3Key } },
+          MinConfidence: AI_CATEGORY_CONFIDENCE,
+          MaxLabels: 60,
+        })
+        .promise();
+
+      const found = new Set((result.Labels || []).map((l) => l.Name).filter(Boolean) as string[]);
+      const categories: string[] = [];
+      for (const [category, labels] of Object.entries(AI_CATEGORY_LABELS)) {
+        if (labels.some((l) => found.has(l))) categories.push(category);
+      }
+      return categories;
+    } catch (error: any) {
+      logger.warn(`detectLabels failed for ${s3Key}: ${error.message}`);
+      return [];
+    }
+  }
+
   async createCollection(collectionId: string): Promise<void> {
     try {
       await rekognition.createCollection({ CollectionId: collectionId }).promise();

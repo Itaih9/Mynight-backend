@@ -7,6 +7,7 @@ export interface IPhoto extends Document {
   thumbnailUrl: string;
   posterUrl?: string;
   category?: string | null;
+  aiCategories?: string[];
   faceId?: string;
   indexedFaces?: Array<{
     faceId: string;
@@ -59,6 +60,12 @@ const photoSchema = new Schema<IPhoto>(
       type: String,
       default: null,
     },
+    // AI-detected wedding categories (dance, kids, drinks…) — a photo can be in
+    // several. Shown alongside folder categories in the gallery filter.
+    aiCategories: {
+      type: [String],
+      default: [],
+    },
     faceId: {
       type: String,
     },
@@ -103,6 +110,7 @@ const photoSchema = new Schema<IPhoto>(
 photoSchema.index({ eventId: 1 });
 photoSchema.index({ eventId: 1, createdAt: -1 });
 photoSchema.index({ eventId: 1, category: 1 });
+photoSchema.index({ eventId: 1, aiCategories: 1 });
 photoSchema.index({ faceId: 1 });
 photoSchema.index({ 'indexedFaces.faceId': 1 });
 

@@ -40,6 +40,7 @@ scripts/*
 !scripts/showcase-video-renditions.js
 !scripts/event-video-renditions.js
 !scripts/showcase-index-faces.js
+!scripts/backfill-ai-categories.js
 
 # Google Drive folder metadata
 desktop.ini

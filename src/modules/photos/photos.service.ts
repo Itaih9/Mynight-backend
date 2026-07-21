@@ -12,7 +12,7 @@ import { Response } from 'express';
 const UPLOAD_WINDOW_DAYS = 180;
 const SHOWCASE_CACHE_TTL = 300000; // 5 min — so S3 showcase edits show up quickly
 const SHUFFLE_CACHE_TTL = 300000;
-const PHOTO_GALLERY_FIELDS = '_id s3Key posterUrl category indexedFaces uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height';
+const PHOTO_GALLERY_FIELDS = '_id s3Key posterUrl category aiCategories indexedFaces uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height';
 
 function hashStringToInt(s: string): number {
   let h = 2166136261;
@@ -248,6 +248,12 @@ class PhotosService {
     if (indexedFaces.length > 0) {
       photo.indexedFaces = indexedFaces;
       photo.faceId = indexedFaces[0].faceId;
+    }
+    // AI wedding categories (best-effort; only for images).
+    if (!metadata?.mimeType?.startsWith('video/')) {
+      photo.aiCategories = await rekognitionService.detectCategories(s3Key);
+    }
+    if (photo.isModified()) {
       await photo.save();
     }
 
@@ -363,7 +369,7 @@ class PhotosService {
     // face data is several MB — enough to stall the stories request long enough
     // that the gallery falls back to page 1 and shows a single ring.
     const photos = await Photo.find({ eventId })
-      .select('_id s3Key thumbnailUrl posterUrl category uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height')
+      .select('_id s3Key thumbnailUrl posterUrl category aiCategories uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height')
       .sort({ createdAt: 1 })
       .lean();
 
@@ -377,6 +383,7 @@ class PhotosService {
         displayUrl: displayUrlFor(p.s3Key, p.metadata?.mimeType),
         posterUrl: p.posterUrl,
         category: p.category ?? null,
+        aiCategories: (p as any).aiCategories ?? [],
         uploaderName: name,
         uploadedBy: p.uploadedBy,
         createdAt: p.createdAt,
@@ -395,8 +402,10 @@ class PhotosService {
 
     const normalizedCategory = normalizeCategory(category);
     const query: Record<string, any> = { eventId };
-    if (normalizedCategory) {
-      query.category = normalizedCategory;
+    if (category) {
+      // Match a folder category (normalized) OR an AI category (exact Hebrew
+      // name), so both kinds of chips filter through the same param.
+      query.$or = [{ category: normalizedCategory }, { aiCategories: category }];
     }
 
     if (!seed) {
@@ -425,7 +434,7 @@ class PhotosService {
     }
 
     logger.debug(`Fetching shuffled photos for event ${eventId} (seed=${seed}, page ${page}, limit ${limit})`);
-    const cacheKey = `${eventId}:${seed}:${normalizedCategory ?? ''}`;
+    const cacheKey = `${eventId}:${seed}:${category ?? ''}`;
     const cached = this.shuffledIdCache.get(cacheKey);
     const cachedIsFresh = Boolean(cached && cached.expiresAt > Date.now());
     const currentTotal = cachedIsFresh ? await Photo.countDocuments(query) : null;
