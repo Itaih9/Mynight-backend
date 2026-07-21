@@ -650,6 +650,94 @@ class PhotosService {
     return photo;
   }
 
+  // ---- Disposable camera (guests shoot a limited film roll) ----
+
+  async getDisposableStatus(eventCodeOrSlug: string, deviceId?: string) {
+    const event = await this.findEventByCodeOrSlug(eventCodeOrSlug);
+    const shotLimit = event.disposableShotLimit ?? 15;
+    const taken = deviceId ? await Photo.countDocuments({ eventId: event._id, deviceId }) : 0;
+    return {
+      enabled: !!event.disposableEnabled,
+      coupleName: event.name,
+      shotLimit,
+      taken,
+      remaining: Math.max(0, shotLimit - taken),
+    };
+  }
+
+  async disposablePresignedUrl(eventCodeOrSlug: string, deviceId: string, fileName: string, fileType: string) {
+    const event = await this.findEventByCodeOrSlug(eventCodeOrSlug);
+    if (!event.disposableEnabled) {
+      throw new ValidationError('מצלמה חד-פעמית אינה פעילה לאירוע זה');
+    }
+    const shotLimit = event.disposableShotLimit ?? 15;
+    const taken = await Photo.countDocuments({ eventId: event._id, deviceId });
+    if (taken >= shotLimit) {
+      throw new ValidationError('אזל הפילם 🎞️');
+    }
+
+    const key = `events/${event.eventCode}/disposable/${nanoid()}-${fileName}`;
+    const url = await s3.getSignedUrlPromise('putObject', {
+      Bucket: env.S3_BUCKET_NAME,
+      Key: key,
+      Expires: 300,
+      ContentType: fileType,
+    });
+    return { uploadUrl: url, key, eventId: (event._id as any).toString(), remaining: shotLimit - taken - 1 };
+  }
+
+  async disposableComplete(
+    eventCodeOrSlug: string,
+    deviceId: string,
+    s3Key: string,
+    guestName?: string,
+    metadata?: { size: number; mimeType: string }
+  ): Promise<{ remaining: number }> {
+    const event = await this.findEventByCodeOrSlug(eventCodeOrSlug);
+    const shotLimit = event.disposableShotLimit ?? 15;
+
+    await this.setUploadStartedIfFirst(event);
+
+    const url = `${env.CLOUDFRONT_URL}/${s3Key}`;
+    const thumbnailUrl = `${env.CLOUDFRONT_URL}/thumbnails/${s3Key}`;
+
+    const photo = await Photo.create({
+      eventId: event._id,
+      s3Key,
+      url,
+      thumbnailUrl,
+      uploadedBy: 'guest',
+      uploaderName: guestName || 'אורח',
+      deviceId,
+      metadata: metadata || {},
+    });
+
+    await Event.findByIdAndUpdate(event._id, {
+      $inc: { photoCount: 1 },
+      lastPhotoUploadedAt: new Date(),
+    });
+    this.clearShuffleCacheForEvent(String(event._id));
+
+    // Face + category tagging, async (never blocks the shutter).
+    rekognitionService.indexEventPhoto({
+      collectionId: event.collectionId,
+      s3Key,
+      eventId: String(event._id),
+      photoId: String(photo._id),
+    }).then(async (indexedFaces) => {
+      const update: any = {};
+      if (indexedFaces.length > 0) {
+        update.indexedFaces = indexedFaces;
+        update.faceId = indexedFaces[0].faceId;
+      }
+      update.aiCategories = await rekognitionService.detectCategories(s3Key);
+      await Photo.findByIdAndUpdate(photo._id, update);
+    }).catch((err) => logger.error(`Disposable tagging failed for ${s3Key}: ${err.message}`));
+
+    const taken = await Photo.countDocuments({ eventId: event._id, deviceId });
+    return { remaining: Math.max(0, shotLimit - taken) };
+  }
+
   async setVideoPoster(s3Key: string, posterKey: string): Promise<IPhoto | null> {
     const photo = await Photo.findOne({ s3Key });
     if (!photo) {

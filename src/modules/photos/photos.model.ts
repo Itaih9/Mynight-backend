@@ -8,6 +8,8 @@ export interface IPhoto extends Document {
   posterUrl?: string;
   category?: string | null;
   aiCategories?: string[];
+  /** Disposable-camera device that shot this photo (for the per-guest limit). */
+  deviceId?: string;
   faceId?: string;
   indexedFaces?: Array<{
     faceId: string;
@@ -65,6 +67,9 @@ const photoSchema = new Schema<IPhoto>(
     aiCategories: {
       type: [String],
       default: [],
+    },
+    deviceId: {
+      type: String,
     },
     faceId: {
       type: String,

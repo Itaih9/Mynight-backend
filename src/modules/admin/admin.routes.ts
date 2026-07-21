@@ -46,6 +46,7 @@ router.patch('/affiliates/:affiliateId/status', adminProtect, adminController.up
 router.patch('/events/:eventId/extend', adminProtect, adminController.extendEventUpload);
 router.patch('/events/:eventId/slug', adminProtect, adminController.updateEventSlug);
 router.patch('/events/:eventId/photographer', adminProtect, adminController.updateEventPhotographer);
+router.patch('/events/:eventId/disposable', adminProtect, adminController.updateEventDisposable);
 router.delete('/events/:eventId', adminProtect, adminController.deleteEvent);
 router.get('/events/:eventId/guest-list-download', adminProtect, adminController.downloadGuestList);
 router.get('/events/:eventId/guest-list-data', adminProtect, adminController.getGuestListData);

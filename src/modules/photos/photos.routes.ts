@@ -37,6 +37,11 @@ router.post('/guest-upload', upload.single('photo'), photosController.guestUploa
 router.post('/guest-presigned-url', validate(guestPresignedUrlSchema), photosController.guestPresignedUrl);
 router.post('/guest-complete', validate(guestCompleteUploadSchema), photosController.guestCompleteUpload);
 
+// Disposable camera (public — guests shoot via /camera/:code)
+router.get('/disposable/status', photosController.disposableStatus);
+router.post('/disposable/presigned-url', photosController.disposablePresignedUrl);
+router.post('/disposable/complete', photosController.disposableComplete);
+
 router.get('/event/:eventId', photosController.getEventPhotos);
 router.get('/event/:eventId/story-groups', photosController.getEventStoryGroups);
 

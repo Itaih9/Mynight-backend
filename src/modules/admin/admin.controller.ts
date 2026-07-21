@@ -303,6 +303,17 @@ export class AdminController {
     }
   }
 
+  async updateEventDisposable(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { eventId } = req.params;
+      const { enabled, shotLimit } = req.body;
+      const result = await adminService.updateEventDisposable(eventId, { enabled, shotLimit });
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async updateEventPhotographer(req: Request, res: Response, next: NextFunction) {
     try {
       const { eventId } = req.params;

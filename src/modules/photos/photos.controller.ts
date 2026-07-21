@@ -220,6 +220,36 @@ export class PhotosController {
     }
   }
 
+  async disposableStatus(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { code, deviceId } = req.query as { code: string; deviceId?: string };
+      const result = await photosService.getDisposableStatus(code, deviceId);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async disposablePresignedUrl(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { eventCode, deviceId, fileName, fileType } = req.body;
+      const result = await photosService.disposablePresignedUrl(eventCode, deviceId, fileName, fileType);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async disposableComplete(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { eventCode, deviceId, s3Key, guestName, metadata } = req.body;
+      const result = await photosService.disposableComplete(eventCode, deviceId, s3Key, guestName, metadata);
+      res.status(201).json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getShowcaseImages(_req: Request, res: Response, next: NextFunction) {
     try {
       const images = await photosService.getShowcaseImages();

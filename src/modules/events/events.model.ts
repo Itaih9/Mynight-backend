@@ -39,6 +39,9 @@ export interface IEvent extends Document {
   // Credited photographer for this event's pro photos (set by admin).
   photographerName?: string;
   photographerInstagram?: string;
+  // Disposable-camera mode: guests shoot a limited film roll via /camera/:code.
+  disposableEnabled?: boolean;
+  disposableShotLimit?: number;
   sharingPermissions: ISharingPermissions;
   guestListFile?: IGuestListFile;
   guestListUploadCount: number;
@@ -119,6 +122,14 @@ const eventSchema = new Schema<IEvent>(
     photographerInstagram: {
       type: String,
       trim: true,
+    },
+    disposableEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    disposableShotLimit: {
+      type: Number,
+      default: 15,
     },
     sharingPermissions: {
       type: {

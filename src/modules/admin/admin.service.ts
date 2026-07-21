@@ -581,6 +581,23 @@ class AdminService {
     };
   }
 
+  async updateEventDisposable(eventId: string, data: { enabled?: boolean; shotLimit?: number }) {
+    const event = await Event.findById(eventId);
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
+    if (typeof data.enabled === 'boolean') event.disposableEnabled = data.enabled;
+    if (typeof data.shotLimit === 'number' && data.shotLimit > 0) {
+      event.disposableShotLimit = Math.min(200, Math.round(data.shotLimit));
+    }
+    await event.save();
+    return {
+      _id: event._id,
+      disposableEnabled: event.disposableEnabled,
+      disposableShotLimit: event.disposableShotLimit,
+    };
+  }
+
   async updateEventSlug(eventId: string, newSlug: string, resetCount: boolean = false) {
     const slug = newSlug.trim().toLowerCase();
     if (!/^[a-z0-9-]{3,}$/.test(slug)) {
