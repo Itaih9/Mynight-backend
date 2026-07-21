@@ -652,8 +652,18 @@ class PhotosService {
 
   // ---- Disposable camera (guests shoot a limited film roll) ----
 
+  // Disposable is gated by the admin's per-event toggle (disposableEnabled),
+  // not the generic isPaid/expiry checks — the admin enabling it is the
+  // authorization, so comped/test events work too.
+  private async findEventForDisposable(eventCodeOrSlug: string): Promise<IEvent> {
+    let event = await Event.findOne({ customSlug: eventCodeOrSlug.toLowerCase() });
+    if (!event) event = await Event.findOne({ eventCode: eventCodeOrSlug.toUpperCase() });
+    if (!event) throw new NotFoundError('Event');
+    return event;
+  }
+
   async getDisposableStatus(eventCodeOrSlug: string, deviceId?: string) {
-    const event = await this.findEventByCodeOrSlug(eventCodeOrSlug);
+    const event = await this.findEventForDisposable(eventCodeOrSlug);
     const shotLimit = event.disposableShotLimit ?? 15;
     const taken = deviceId ? await Photo.countDocuments({ eventId: event._id, deviceId }) : 0;
     return {
@@ -666,7 +676,7 @@ class PhotosService {
   }
 
   async disposablePresignedUrl(eventCodeOrSlug: string, deviceId: string, fileName: string, fileType: string) {
-    const event = await this.findEventByCodeOrSlug(eventCodeOrSlug);
+    const event = await this.findEventForDisposable(eventCodeOrSlug);
     if (!event.disposableEnabled) {
       throw new ValidationError('מצלמה חד-פעמית אינה פעילה לאירוע זה');
     }
@@ -693,7 +703,7 @@ class PhotosService {
     guestName?: string,
     metadata?: { size: number; mimeType: string }
   ): Promise<{ remaining: number }> {
-    const event = await this.findEventByCodeOrSlug(eventCodeOrSlug);
+    const event = await this.findEventForDisposable(eventCodeOrSlug);
     const shotLimit = event.disposableShotLimit ?? 15;
 
     await this.setUploadStartedIfFirst(event);
