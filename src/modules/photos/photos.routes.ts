@@ -39,8 +39,10 @@ router.post('/guest-complete', validate(guestCompleteUploadSchema), photosContro
 
 // Disposable camera (public — guests shoot via /camera/:code)
 router.get('/disposable/status', photosController.disposableStatus);
+router.get('/disposable/shots', photosController.disposableShots);
 router.post('/disposable/presigned-url', photosController.disposablePresignedUrl);
 router.post('/disposable/complete', photosController.disposableComplete);
+router.post('/disposable/delete', photosController.disposableDelete);
 
 router.get('/event/:eventId', photosController.getEventPhotos);
 router.get('/event/:eventId/story-groups', photosController.getEventStoryGroups);

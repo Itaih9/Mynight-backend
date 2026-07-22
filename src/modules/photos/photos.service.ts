@@ -1,4 +1,5 @@
 import { Photo, IPhoto } from './photos.model';
+import { DisposableRoll } from './disposableRoll.model';
 import { Event, IEvent } from '../events/events.model';
 import { rekognitionService } from '../rekognition/rekognition.service';
 import { s3 } from '@/shared/config/aws';
@@ -662,10 +663,16 @@ class PhotosService {
     return event;
   }
 
+  private async firedCount(eventId: any, deviceId: string): Promise<number> {
+    if (!deviceId) return 0;
+    const roll = await DisposableRoll.findOne({ eventId, deviceId }).lean();
+    return roll?.fired ?? 0;
+  }
+
   async getDisposableStatus(eventCodeOrSlug: string, deviceId?: string) {
     const event = await this.findEventForDisposable(eventCodeOrSlug);
     const shotLimit = event.disposableShotLimit ?? 16;
-    const taken = deviceId ? await Photo.countDocuments({ eventId: event._id, deviceId }) : 0;
+    const taken = deviceId ? await this.firedCount(event._id, deviceId) : 0;
     return {
       enabled: !!event.disposableEnabled,
       coupleName: event.name,
@@ -682,7 +689,7 @@ class PhotosService {
       throw new ValidationError('מצלמה חד-פעמית אינה פעילה לאירוע זה');
     }
     const shotLimit = event.disposableShotLimit ?? 16;
-    const taken = await Photo.countDocuments({ eventId: event._id, deviceId });
+    const taken = await this.firedCount(event._id, deviceId);
     if (taken >= shotLimit) {
       throw new ValidationError('אזל הפילם 🎞️');
     }
@@ -703,7 +710,7 @@ class PhotosService {
     s3Key: string,
     guestName?: string,
     metadata?: { size: number; mimeType: string }
-  ): Promise<{ remaining: number }> {
+  ): Promise<{ remaining: number; photo: { _id: string; url: string; thumbnailUrl: string; type: string } }> {
     const event = await this.findEventForDisposable(eventCodeOrSlug);
     const shotLimit = event.disposableShotLimit ?? 16;
 
@@ -745,8 +752,54 @@ class PhotosService {
       await Photo.findByIdAndUpdate(photo._id, update);
     }).catch((err) => logger.error(`Disposable tagging failed for ${s3Key}: ${err.message}`));
 
-    const taken = await Photo.countDocuments({ eventId: event._id, deviceId });
-    return { remaining: Math.max(0, shotLimit - taken) };
+    // Count the fired shot — this only ever increases, so deleting a photo
+    // later never refunds the shot.
+    const roll = await DisposableRoll.findOneAndUpdate(
+      { eventId: event._id, deviceId },
+      { $inc: { fired: 1 } },
+      { upsert: true, new: true }
+    );
+    return {
+      remaining: Math.max(0, shotLimit - roll.fired),
+      photo: {
+        _id: String(photo._id),
+        url,
+        thumbnailUrl,
+        type: metadata?.mimeType?.startsWith('video/') ? 'video' : 'photo',
+      },
+    };
+  }
+
+  /** The guest's own disposable shots (for the strip / review gallery). */
+  async getDisposableShots(eventCodeOrSlug: string, deviceId: string) {
+    const event = await this.findEventForDisposable(eventCodeOrSlug);
+    const photos = await Photo.find({ eventId: event._id, deviceId })
+      .select('_id s3Key thumbnailUrl metadata.mimeType createdAt')
+      .sort({ createdAt: 1 })
+      .lean();
+    return photos.map((p) => ({
+      _id: String(p._id),
+      url: `${env.CLOUDFRONT_URL}/${p.s3Key}`,
+      thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${p.s3Key}`,
+      type: (p as any).metadata?.mimeType?.startsWith('video/') ? 'video' : 'photo',
+    }));
+  }
+
+  /** Delete one of the guest's own shots — the fired count is left untouched. */
+  async deleteDisposablePhoto(eventCodeOrSlug: string, deviceId: string, photoId: string) {
+    const event = await this.findEventForDisposable(eventCodeOrSlug);
+    const photo = await Photo.findOne({ _id: photoId, eventId: event._id, deviceId });
+    if (!photo) throw new NotFoundError('Photo');
+
+    try {
+      await s3.deleteObject({ Bucket: env.S3_BUCKET_NAME, Key: photo.s3Key }).promise();
+    } catch (err: any) {
+      logger.warn(`Disposable delete: S3 remove failed for ${photo.s3Key}: ${err.message}`);
+    }
+    await photo.deleteOne();
+    await Event.findByIdAndUpdate(event._id, { $inc: { photoCount: -1 } });
+    this.clearShuffleCacheForEvent(String(event._id));
+    return { deleted: true };
   }
 
   async setVideoPoster(s3Key: string, posterKey: string): Promise<IPhoto | null> {

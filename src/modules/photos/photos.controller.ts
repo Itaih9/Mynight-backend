@@ -250,6 +250,26 @@ export class PhotosController {
     }
   }
 
+  async disposableShots(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { code, deviceId } = req.query as { code: string; deviceId: string };
+      const shots = await photosService.getDisposableShots(code, deviceId);
+      res.json({ success: true, data: shots });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async disposableDelete(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { eventCode, deviceId, photoId } = req.body;
+      const result = await photosService.deleteDisposablePhoto(eventCode, deviceId, photoId);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getShowcaseImages(_req: Request, res: Response, next: NextFunction) {
     try {
       const images = await photosService.getShowcaseImages();
