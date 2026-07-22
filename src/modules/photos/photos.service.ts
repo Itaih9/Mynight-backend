@@ -669,6 +669,7 @@ class PhotosService {
     return {
       enabled: !!event.disposableEnabled,
       coupleName: event.name,
+      weddingDate: event.weddingDate ?? null,
       shotLimit,
       taken,
       remaining: Math.max(0, shotLimit - taken),
