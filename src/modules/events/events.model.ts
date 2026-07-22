@@ -129,7 +129,7 @@ const eventSchema = new Schema<IEvent>(
     },
     disposableShotLimit: {
       type: Number,
-      default: 15,
+      default: 16,
     },
     sharingPermissions: {
       type: {

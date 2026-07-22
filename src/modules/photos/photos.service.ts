@@ -664,7 +664,7 @@ class PhotosService {
 
   async getDisposableStatus(eventCodeOrSlug: string, deviceId?: string) {
     const event = await this.findEventForDisposable(eventCodeOrSlug);
-    const shotLimit = event.disposableShotLimit ?? 15;
+    const shotLimit = event.disposableShotLimit ?? 16;
     const taken = deviceId ? await Photo.countDocuments({ eventId: event._id, deviceId }) : 0;
     return {
       enabled: !!event.disposableEnabled,
@@ -680,7 +680,7 @@ class PhotosService {
     if (!event.disposableEnabled) {
       throw new ValidationError('מצלמה חד-פעמית אינה פעילה לאירוע זה');
     }
-    const shotLimit = event.disposableShotLimit ?? 15;
+    const shotLimit = event.disposableShotLimit ?? 16;
     const taken = await Photo.countDocuments({ eventId: event._id, deviceId });
     if (taken >= shotLimit) {
       throw new ValidationError('אזל הפילם 🎞️');
@@ -704,7 +704,7 @@ class PhotosService {
     metadata?: { size: number; mimeType: string }
   ): Promise<{ remaining: number }> {
     const event = await this.findEventForDisposable(eventCodeOrSlug);
-    const shotLimit = event.disposableShotLimit ?? 15;
+    const shotLimit = event.disposableShotLimit ?? 16;
 
     await this.setUploadStartedIfFirst(event);
 
