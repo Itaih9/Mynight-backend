@@ -232,7 +232,7 @@ class EmailService {
       <div style="background:#fff;border:1px solid ${BRAND.bg};border-radius:8px;padding:18px 22px;margin:28px 0 0 0;">
         <p style="margin:0 0 8px 0;font-size:15px;font-weight:700;color:${BRAND.primary};">רוצים שכל אורח יקבל את התמונות שלו?</p>
         <p style="margin:0 0 14px 0;font-size:14px;line-height:1.8;color:${BRAND.text};">פלאש אוסף את הצילומים. <strong>Here I Am</strong> מוסיף זיהוי פנים — כל אורח מקבל אלבום אישי רק עם התמונות שהוא מופיע בהן, כולל התמונות מהצלם המקצועי.</p>
-        ${button(`${env.FRONTEND_URL}/packages`, 'שדרוג ל-Here I Am')}
+        ${button(`${env.FRONTEND_URL}/here-i-am`, 'שדרוג ל-Here I Am')}
       </div>
       <p style="margin:24px 0 0 0;font-size:14px;color:${BRAND.muted};">יש שאלה? פשוט השיבו למייל הזה.</p>
     `;
@@ -269,7 +269,7 @@ class EmailService {
         </ul>
       </div>
       <p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:${BRAND.text};">זה בדיוק מה ש-<strong>Here I Am</strong> עושה. אפשר לשדרג עד ליום החתונה.</p>
-      ${button(`${env.FRONTEND_URL}/packages`, 'שדרוג ל-Here I Am')}
+      ${button(`${env.FRONTEND_URL}/here-i-am`, 'שדרוג ל-Here I Am')}
       <p style="margin:24px 0 0 0;font-size:13px;color:${BRAND.muted};">לא מעוניינים? אפשר להתעלם — פלאש נשאר שלכם בחינם.</p>
     `;
     await this.sendEmail({
