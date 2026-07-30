@@ -42,6 +42,11 @@ export interface IEvent extends Document {
   // Disposable-camera mode: guests shoot a limited film roll via /camera/:code.
   disposableEnabled?: boolean;
   disposableShotLimit?: number;
+  // Lead-gen: free פלאש signups are the top of the funnel. `source` marks how the
+  // event was created; `upsellsSent` makes the pre-wedding email sequence
+  // idempotent (each stage key is recorded once it has been sent).
+  source?: 'flash_free' | 'paid' | 'admin';
+  upsellsSent?: string[];
   sharingPermissions: ISharingPermissions;
   guestListFile?: IGuestListFile;
   guestListUploadCount: number;
@@ -131,6 +136,15 @@ const eventSchema = new Schema<IEvent>(
       type: Number,
       default: 16,
     },
+    source: {
+      type: String,
+      enum: ['flash_free', 'paid', 'admin'],
+      default: 'paid',
+    },
+    upsellsSent: {
+      type: [String],
+      default: [],
+    },
     sharingPermissions: {
       type: {
         showProPhotos: { type: Boolean, default: true },
@@ -174,5 +188,7 @@ const eventSchema = new Schema<IEvent>(
 eventSchema.index({ userId: 1 });
 eventSchema.index({ expiresAt: 1 });
 eventSchema.index({ customSlug: 1 });
+// Drives the pre-wedding upsell sweep: unpaid free-פלאש events by wedding date.
+eventSchema.index({ source: 1, isPaid: 1, weddingDate: 1 });
 
 export const Event = mongoose.model<IEvent>('Event', eventSchema);

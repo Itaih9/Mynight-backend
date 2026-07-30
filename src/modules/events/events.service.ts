@@ -92,6 +92,173 @@ class EventsService {
     return event;
   }
 
+  /**
+   * Self-serve FREE פלאש signup — the top of the lead funnel.
+   *
+   * A couple registers with no payment and gets the disposable camera enabled
+   * immediately. They keep every photo their guests shoot; what's sold later is
+   * the smart layer (face recognition, per-guest albums, photographer photos).
+   * The event is marked `source: 'flash_free'` so the pre-wedding upsell sweep
+   * can find it, and stays `isPaid: false` until they buy.
+   *
+   * Idempotent per phone: a couple who signs up twice gets their existing free
+   * event back rather than a duplicate.
+   */
+  async registerFreeFlash(data: {
+    coupleName: string;
+    weddingDate: Date;
+    phoneNumber: string;
+    email?: string;
+  }): Promise<{ event: IEvent; isNew: boolean }> {
+    const phone = data.phoneNumber.trim();
+
+    let user = await User.findOne({ phoneNumber: phone });
+    if (!user) {
+      user = await User.create({
+        phoneNumber: phone,
+        name: data.coupleName,
+        email: data.email,
+        weddingDate: data.weddingDate,
+      });
+      logger.info(`Free פלאש: created user ${user._id} (${phone})`);
+    } else {
+      // Fill gaps without clobbering anything they've already set.
+      const patch: Record<string, unknown> = {};
+      if (!user.weddingDate) patch.weddingDate = data.weddingDate;
+      if (!user.email && data.email) patch.email = data.email;
+      if (!user.name) patch.name = data.coupleName;
+      if (Object.keys(patch).length) await User.updateOne({ _id: user._id }, patch);
+    }
+
+    const existing = await Event.findOne({ userId: user._id, source: 'flash_free' });
+    if (existing) {
+      if (!existing.disposableEnabled) {
+        existing.disposableEnabled = true;
+        await existing.save();
+      }
+      return { event: existing, isNew: false };
+    }
+
+    const eventCode = generateEventCode();
+    const collectionId = `event-${eventCode.toLowerCase()}`;
+    await rekognitionService.createCollection(collectionId);
+
+    // Keep the album alive well past the wedding so there's time to convert.
+    const expiresAt = new Date(data.weddingDate);
+    expiresAt.setMonth(expiresAt.getMonth() + 6);
+
+    const event = await Event.create({
+      userId: user._id,
+      name: data.coupleName,
+      eventCode,
+      collectionId,
+      expiresAt,
+      weddingDate: data.weddingDate,
+      isPaid: false,
+      source: 'flash_free',
+      disposableEnabled: true,
+    });
+
+    logger.info(`Free פלאש registered: ${eventCode} for ${data.coupleName} (${phone})`);
+
+    await this.ensureGiftCoupon(String(event._id));
+    // Welcome + first Here I Am pitch. Never let mail failure abort signup.
+    try {
+      if (data.email || user.email) {
+        const { emailService } = await import('@/shared/services/email.service');
+        await emailService.sendFlashWelcomeEmail({
+          to: (data.email || user.email)!,
+          coupleName: data.coupleName,
+          eventCode,
+          weddingDate: data.weddingDate,
+        });
+      }
+    } catch (err) {
+      logger.error(`Free פלאש welcome mail failed for ${eventCode}: ${(err as Error).message}`);
+    }
+
+    return { event, isNew: true };
+  }
+
+  /**
+   * Pre-wedding upsell sweep for free פלאש couples.
+   *
+   * Runs on a timer (see startUpsellScheduler). For each unpaid free event whose
+   * wedding falls inside a stage window, sends the Here I Am pitch once and
+   * records the stage key in `upsellsSent` — so restarts, overlapping runs, or a
+   * changed schedule never re-send the same stage.
+   *
+   * Deliberately stops at the wedding date: couples don't buy once the day has
+   * passed, so chasing them afterwards only burns goodwill.
+   */
+  async runUpsellSweep(): Promise<{ checked: number; sent: number }> {
+    const STAGES: { key: string; daysBefore: number }[] = [
+      { key: 'd60', daysBefore: 60 },
+      { key: 'd30', daysBefore: 30 },
+      { key: 'd7', daysBefore: 7 },
+    ];
+
+    const now = new Date();
+    const horizon = new Date(now);
+    horizon.setDate(horizon.getDate() + 61);
+
+    const events = await Event.find({
+      source: 'flash_free',
+      isPaid: false,
+      weddingDate: { $gte: now, $lte: horizon },
+    });
+
+    let sent = 0;
+    for (const event of events) {
+      if (!event.weddingDate) continue;
+      const daysOut = Math.ceil(
+        (new Date(event.weddingDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      // Pick the most urgent stage this event has entered but not yet been sent.
+      const stage = STAGES.filter((s) => daysOut <= s.daysBefore)
+        .sort((a, b) => a.daysBefore - b.daysBefore)[0];
+      if (!stage || (event.upsellsSent || []).includes(stage.key)) continue;
+
+      try {
+        const user = await User.findById(event.userId);
+        if (!user?.email) continue;
+        const { emailService } = await import('@/shared/services/email.service');
+        await emailService.sendFlashUpsellEmail({
+          to: user.email,
+          coupleName: event.name,
+          eventCode: event.eventCode,
+          daysUntilWedding: daysOut,
+        });
+        await Event.updateOne({ _id: event._id }, { $addToSet: { upsellsSent: stage.key } });
+        sent++;
+        logger.info(`Upsell ${stage.key} sent for free פלאש event ${event.eventCode}`);
+      } catch (err) {
+        logger.error(`Upsell sweep failed for ${event.eventCode}: ${(err as Error).message}`);
+      }
+    }
+
+    return { checked: events.length, sent };
+  }
+
+  /**
+   * Timer-based scheduler. Deliberately not a cron dependency: a plain interval
+   * plus the `upsellsSent` idempotency guard is enough here, survives pm2
+   * restarts, and adds nothing to install.
+   */
+  startUpsellScheduler(): void {
+    const SIX_HOURS = 6 * 60 * 60 * 1000;
+    const run = () => {
+      this.runUpsellSweep()
+        .then((r) => {
+          if (r.sent) logger.info(`Upsell sweep: ${r.sent}/${r.checked} sent`);
+        })
+        .catch((err) => logger.error(`Upsell sweep crashed: ${(err as Error).message}`));
+    };
+    setTimeout(run, 60_000); // let the app finish booting first
+    setInterval(run, SIX_HOURS);
+    logger.info('Free-פלאש upsell scheduler started (every 6h)');
+  }
+
   // Guest link + calendar reminders for the couple. Never let a mail failure
   // abort event creation — the event is the thing that matters.
   private async sendCreationEmail(userId: string, event: IEvent): Promise<void> {

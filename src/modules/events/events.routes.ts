@@ -25,6 +25,9 @@ const upload = multer({
 
 const router = Router();
 
+// Public: free פלאש signup — no auth, no payment (top of the lead funnel).
+router.post('/flash/register', eventsController.registerFreeFlash);
+
 router.post('/', protect, validate(createEventSchema), eventsController.createEvent);
 router.get('/my-events', protect, eventsController.getUserEvents);
 router.get('/code/:code', eventsController.getEventByCode);

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { eventsService } from './events.service';
 import { AuthRequest } from '@/shared/middleware/auth.middleware';
+import { env } from '@/shared/config/env';
 
 export class EventsController {
   async createEvent(req: AuthRequest, res: Response, next: NextFunction) {
@@ -164,6 +165,46 @@ export class EventsController {
       res.json({
         success: true,
         data: guestListFile,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Public, unauthenticated: free פלאש signup (top of the lead funnel). */
+  async registerFreeFlash(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { coupleName, weddingDate, phoneNumber, email } = req.body || {};
+      if (!coupleName || !String(coupleName).trim()) {
+        res.status(400).json({ success: false, error: 'שם הזוג נדרש' });
+        return;
+      }
+      if (!phoneNumber || !String(phoneNumber).trim()) {
+        res.status(400).json({ success: false, error: 'מספר טלפון נדרש' });
+        return;
+      }
+      const date = new Date(weddingDate);
+      if (!weddingDate || isNaN(date.getTime())) {
+        res.status(400).json({ success: false, error: 'תאריך חתונה נדרש' });
+        return;
+      }
+
+      const { event, isNew } = await eventsService.registerFreeFlash({
+        coupleName: String(coupleName).trim(),
+        weddingDate: date,
+        phoneNumber: String(phoneNumber).trim(),
+        email: email ? String(email).trim() : undefined,
+      });
+
+      res.status(isNew ? 201 : 200).json({
+        success: true,
+        data: {
+          eventCode: event.eventCode,
+          cameraUrl: `${env.FRONTEND_URL}/camera/${event.eventCode}`,
+          weddingDate: event.weddingDate,
+          shotLimit: event.disposableShotLimit ?? 16,
+          isNew,
+        },
       });
     } catch (error) {
       next(error);

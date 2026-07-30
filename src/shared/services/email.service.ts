@@ -208,6 +208,80 @@ class EmailService {
   }
 
   /**
+   * Sent when a couple registers for FREE פלאש. Confirms their camera link and
+   * plants the Here I Am pitch — free covers the shooting, the paid layer is
+   * what finds each guest their own photos.
+   */
+  async sendFlashWelcomeEmail(opts: {
+    to: string;
+    coupleName: string;
+    eventCode: string;
+    weddingDate: Date;
+  }): Promise<void> {
+    const link = `${env.FRONTEND_URL}/camera/${opts.eventCode}`;
+    const dateLabel = new Date(opts.weddingDate).toLocaleDateString('he-IL');
+    const body = `
+      <h1 style="margin:0 0 12px 0;font-size:24px;font-weight:700;color:${BRAND.primary};">פלאש שלכם מוכן 📸</h1>
+      <p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:${BRAND.text};">${opts.coupleName}, מזל טוב! הכנו לכם מצלמה חד-פעמית לאורחים לחתונה ב-${dateLabel}.</p>
+      <div style="background:${BRAND.bg};border-right:3px solid ${BRAND.accent};border-radius:8px;padding:18px 22px;margin:24px 0;">
+        <p style="margin:0 0 10px 0;font-size:14px;font-weight:700;color:${BRAND.primary};">הקישור לאורחים</p>
+        <p style="margin:0 0 10px 0;font-size:14px;line-height:1.8;color:${BRAND.text};word-break:break-all;">${link}</p>
+        <p style="margin:0;font-size:13px;color:${BRAND.muted};">כל אורח מקבל 16 צילומים. בלי לראות, בלי לחזור אחורה — הכל מתפתח בבוקר שאחרי.</p>
+      </div>
+      ${button(link, 'לצפייה במצלמה')}
+      <div style="background:#fff;border:1px solid ${BRAND.bg};border-radius:8px;padding:18px 22px;margin:28px 0 0 0;">
+        <p style="margin:0 0 8px 0;font-size:15px;font-weight:700;color:${BRAND.primary};">רוצים שכל אורח יקבל את התמונות שלו?</p>
+        <p style="margin:0 0 14px 0;font-size:14px;line-height:1.8;color:${BRAND.text};">פלאש אוסף את הצילומים. <strong>Here I Am</strong> מוסיף זיהוי פנים — כל אורח מקבל אלבום אישי רק עם התמונות שהוא מופיע בהן, כולל התמונות מהצלם המקצועי.</p>
+        ${button(`${env.FRONTEND_URL}/packages`, 'שדרוג ל-Here I Am')}
+      </div>
+      <p style="margin:24px 0 0 0;font-size:14px;color:${BRAND.muted};">יש שאלה? פשוט השיבו למייל הזה.</p>
+    `;
+    await this.sendEmail({
+      to: opts.to,
+      subject: `פלאש שלכם מוכן — ${opts.coupleName} 📸`,
+      htmlBody: renderLayout({ preheader: `הקישור למצלמה של האורחים מוכן.`, body, dir: 'rtl' }),
+    });
+  }
+
+  /**
+   * Pre-wedding nudge for free פלאש couples who haven't bought yet. Tone shifts
+   * with proximity — informative far out, time-bound close in.
+   */
+  async sendFlashUpsellEmail(opts: {
+    to: string;
+    coupleName: string;
+    eventCode: string;
+    daysUntilWedding: number;
+  }): Promise<void> {
+    const urgent = opts.daysUntilWedding <= 7;
+    const headline = urgent
+      ? `עוד ${opts.daysUntilWedding} ימים לחתונה שלכם`
+      : `${opts.coupleName}, נשארו ${opts.daysUntilWedding} ימים`;
+    const body = `
+      <h1 style="margin:0 0 12px 0;font-size:24px;font-weight:700;color:${BRAND.primary};">${headline}</h1>
+      <p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:${BRAND.text};">פלאש כבר מוכן — האורחים שלכם יצלמו, ואתם תקבלו את כל התמונות בבוקר שאחרי.</p>
+      <div style="background:${BRAND.bg};border-right:3px solid ${BRAND.accent};border-radius:8px;padding:18px 22px;margin:24px 0;">
+        <p style="margin:0 0 10px 0;font-size:14px;font-weight:700;color:${BRAND.primary};">מה שפלאש לא עושה לבד</p>
+        <ul style="margin:0;padding-right:18px;padding-left:0;font-size:14px;line-height:1.9;color:${BRAND.text};">
+          <li>כל אורח מקבל אלבום אישי — רק עם התמונות שהוא בהן</li>
+          <li>גם התמונות מהצלם המקצועי נכנסות לזיהוי הפנים</li>
+          <li>סטורי מוכן כבר ביום שאחרי החתונה</li>
+        </ul>
+      </div>
+      <p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:${BRAND.text};">זה בדיוק מה ש-<strong>Here I Am</strong> עושה. אפשר לשדרג עד ליום החתונה.</p>
+      ${button(`${env.FRONTEND_URL}/packages`, 'שדרוג ל-Here I Am')}
+      <p style="margin:24px 0 0 0;font-size:13px;color:${BRAND.muted};">לא מעוניינים? אפשר להתעלם — פלאש נשאר שלכם בחינם.</p>
+    `;
+    await this.sendEmail({
+      to: opts.to,
+      subject: urgent
+        ? `עוד ${opts.daysUntilWedding} ימים — רוצים שכל אורח יקבל את התמונות שלו?`
+        : `${opts.coupleName}, שדרוג אחד לפני החתונה`,
+      htmlBody: renderLayout({ preheader: `זיהוי פנים לכל אורח, כולל תמונות הצלם.`, body, dir: 'rtl' }),
+    });
+  }
+
+  /**
    * Internal alert sent to ADMIN_NOTIFY_EMAIL when an event is paid for. Carries
    * the amount, coupon and referral status; the couple never sees this.
    */
