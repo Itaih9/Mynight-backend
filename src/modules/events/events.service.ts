@@ -10,10 +10,24 @@ import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
 
 class EventsService {
-  private isExpired(event: IEvent): boolean {
-    const base = new Date(event.createdAt);
+  /**
+   * Every event lives until 6 months AFTER the wedding — not 6 months after it
+   * was created. A couple who books a year out would otherwise lose the album
+   * before the day. Falls back to creation date only when no wedding date is
+   * known (the bare createEvent path).
+   */
+  private computeExpiresAt(weddingDate?: Date | null, createdAt?: Date): Date {
+    const base = new Date(weddingDate || createdAt || new Date());
     base.setMonth(base.getMonth() + 6);
+    return base;
+  }
+
+  private isExpired(event: IEvent): boolean {
+    // Derive from weddingDate rather than trusting the stored value, so events
+    // created before this rule get the correct lifetime with no migration.
+    const base = this.computeExpiresAt(event.weddingDate, event.createdAt);
     const stored = event.expiresAt ? new Date(event.expiresAt) : null;
+    // A stored date that's later wins — that's an admin extension.
     const effective = stored && stored > base ? stored : base;
     return effective < new Date();
   }
@@ -24,8 +38,8 @@ class EventsService {
 
     await rekognitionService.createCollection(collectionId);
 
-    const expiresAt = new Date();
-    expiresAt.setMonth(expiresAt.getMonth() + 6);
+    // No wedding date on this path — falls back to creation date.
+    const expiresAt = this.computeExpiresAt(null, new Date());
 
     const event = await Event.create({
       userId,
@@ -58,8 +72,7 @@ class EventsService {
 
     await rekognitionService.createCollection(collectionId);
 
-    const expiresAt = new Date();
-    expiresAt.setMonth(expiresAt.getMonth() + 6);
+    const expiresAt = this.computeExpiresAt(weddingDate);
 
     const suffixPattern = /-[a-z0-9]{4}$/;
     const slugBase = suffixPattern.test(customSlug)
@@ -143,9 +156,7 @@ class EventsService {
     const collectionId = `event-${eventCode.toLowerCase()}`;
     await rekognitionService.createCollection(collectionId);
 
-    // Keep the album alive well past the wedding so there's time to convert.
-    const expiresAt = new Date(data.weddingDate);
-    expiresAt.setMonth(expiresAt.getMonth() + 6);
+    const expiresAt = this.computeExpiresAt(data.weddingDate);
 
     const event = await Event.create({
       userId: user._id,
