@@ -34,7 +34,10 @@ if (SENDGRID_ENABLED) {
 }
 
 const BRAND = {
-  logoUrl: 'https://i.postimg.cc/mPStkVPV/logo.png',
+  // Served from our own domain, not a free image host. The previous postimg.cc
+  // link had 404'd, which is why the logo stopped rendering — those links expire.
+  // Must stay a PNG/JPG: email clients don't render SVG.
+  logoUrl: `${env.FRONTEND_URL}/logo-email.png`,
   name: 'MyNight',
   tagline: 'Photo Matching Made Easy',
   primary: '#1A1A1A',
@@ -73,8 +76,10 @@ function renderLayout(opts: {
                 <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                   <tr>
                     <td align="center" valign="middle" style="padding:0;">
-                      <img src="${BRAND.logoUrl}" alt="${BRAND.name}" width="44" height="44" style="display:inline-block;vertical-align:middle;border:0;outline:none;margin-right:12px;" />
-                      <span style="display:inline-block;vertical-align:middle;font-size:26px;font-weight:800;letter-spacing:0.5px;color:${BRAND.primary};font-family:Georgia,'Times New Roman',serif;">${BRAND.name}</span>
+                      <!-- Wordmark alone at its real aspect ratio; the old markup
+                           squashed it into a 44x44 box beside duplicate text. The
+                           alt text carries the brand when images are blocked. -->
+                      <img src="${BRAND.logoUrl}" alt="${BRAND.name}" width="170" style="display:block;border:0;outline:none;width:170px;max-width:170px;height:auto;" />
                     </td>
                   </tr>
                 </table>
