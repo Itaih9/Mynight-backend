@@ -23,10 +23,17 @@ interface Recipient {
  * hardcoded 60/30/7 stages exactly so behaviour is unchanged on migration —
  * everything here is editable in the admin afterwards.
  */
-const DEFAULT_CAMPAIGNS: Partial<IEmailCampaign>[] = [60, 30, 7].map((days) => ({
+// Each stage carries a lower bound so the windows don't overlap. Without it a
+// couple who registers 10 days out matches d60 AND d30 on the same sweep and
+// receives two near-identical emails at once.
+const DEFAULT_CAMPAIGNS: Partial<IEmailCampaign>[] = [
+  { days: 60, minDays: 31 },
+  { days: 30, minDays: 8 },
+  { days: 7, minDays: 0 },
+].map(({ days, minDays }) => ({
   name: `Here I Am — ${days} ימים לפני החתונה`,
   audience: 'flash_free_unpaid' as const,
-  filters: { requireEmail: true },
+  filters: { requireEmail: true, minDaysToWedding: minDays },
   trigger: { type: 'before_wedding' as const, days },
   subject:
     days <= 7
@@ -52,9 +59,26 @@ const DEFAULT_CAMPAIGNS: Partial<IEmailCampaign>[] = [60, 30, 7].map((days) => (
 
 class EmailCampaignService {
   async seedDefaults(): Promise<void> {
-    if ((await EmailCampaign.countDocuments()) > 0) return;
-    await EmailCampaign.insertMany(DEFAULT_CAMPAIGNS);
-    logger.info(`Seeded ${DEFAULT_CAMPAIGNS.length} default email campaigns`);
+    if ((await EmailCampaign.countDocuments()) === 0) {
+      await EmailCampaign.insertMany(DEFAULT_CAMPAIGNS);
+      logger.info(`Seeded ${DEFAULT_CAMPAIGNS.length} default email campaigns`);
+      return;
+    }
+
+    // Backfill: campaigns seeded before stage windows existed have no lower
+    // bound, so overlapping stages would double-send. Give any before_wedding
+    // campaign that's still missing one the bound implied by its own stage.
+    const BOUNDS: Record<number, number> = { 60: 31, 30: 8, 7: 0 };
+    const stale = await EmailCampaign.find({
+      'trigger.type': 'before_wedding',
+      'filters.minDaysToWedding': { $exists: false },
+    });
+    for (const c of stale) {
+      const min = BOUNDS[c.trigger.days ?? -1];
+      if (min === undefined) continue;
+      await EmailCampaign.updateOne({ _id: c._id }, { $set: { 'filters.minDaysToWedding': min } });
+      logger.info(`Campaign "${c.name}": set minDaysToWedding=${min} to stop overlapping stages`);
+    }
   }
 
   // ---- CRUD ----------------------------------------------------------------

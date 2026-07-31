@@ -154,10 +154,12 @@ class EmailService {
           Source: this.fromEmail,
           Destination: { ToAddresses: [to] },
           Message: {
-            Subject: { Data: subject },
+            // Charset is REQUIRED for Hebrew. SES falls back to 7-bit ASCII when
+            // it's omitted, which turns every non-Latin character into '?'.
+            Subject: { Data: subject, Charset: 'UTF-8' },
             Body: {
-              Html: { Data: htmlBody },
-              Text: { Data: textBody || htmlBody.replace(/<[^>]*>/g, '') },
+              Html: { Data: htmlBody, Charset: 'UTF-8' },
+              Text: { Data: textBody || htmlBody.replace(/<[^>]*>/g, ''), Charset: 'UTF-8' },
             },
           },
         })
