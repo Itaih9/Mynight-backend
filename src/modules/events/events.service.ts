@@ -3,7 +3,7 @@ import { User } from '../auth/user.model';
 import { Photo } from '../photos/photos.model';
 import { rekognitionService } from '../rekognition/rekognition.service';
 import { couponService } from '../coupon/coupon.service';
-import { generateEventCode, generateRandomSlugSuffix, formatPhoneNumber } from '@/shared/utils/helpers';
+import { generateEventCode, generateRandomSlugSuffix, formatPhoneNumber, generateReferralCode } from '@/shared/utils/helpers';
 import { NotFoundError, ValidationError } from '@/shared/utils/errors';
 import logger from '@/shared/utils/logger';
 import { s3 } from '@/shared/config/aws';
@@ -135,6 +135,9 @@ class EventsService {
         name: data.coupleName,
         email: data.email,
         weddingDate: data.weddingDate,
+        // Required and unique on the model — the auth paths generate it too, and
+        // omitting it made every free signup fail with a 500.
+        referralCode: generateReferralCode(),
       });
       logger.info(`Free פלאש: created user ${user._id} (${phone})`);
     } else {
