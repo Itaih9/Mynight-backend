@@ -20,12 +20,22 @@ export const sanitizePhoneNumber = (phone: string): string => {
   return phone.replace(/\D/g, '');
 };
 
+/**
+ * Normalize an Israeli phone number to canonical E.164 (+972 + 9-digit core).
+ *
+ * The old version merely prepended '+' to the stripped digits, so a locally
+ * typed 0500000009 became "+0500000009" instead of "+972500000009" — logins
+ * still matched (both paths used this same function) but the number was never
+ * routable, which broke WhatsApp/Wati delivery. This reduces any input variant
+ * (0-prefixed, +972, +9720, 00972, bare core) to the same +972<core> form —
+ * the primary variant israeliPhoneCandidates() already looks up.
+ */
 export const formatPhoneNumber = (phone: string): string => {
-  const cleaned = sanitizePhoneNumber(phone);
-  if (!cleaned.startsWith('+')) {
-    return `+${cleaned}`;
-  }
-  return cleaned;
+  let digits = sanitizePhoneNumber(phone); // digits only — strips '+' and separators
+  if (digits.startsWith('00')) digits = digits.slice(2); // 00<cc> international prefix
+  if (digits.startsWith('972')) digits = digits.slice(3); // drop country code
+  digits = digits.replace(/^0+/, ''); // drop local trunk 0(s)
+  return digits ? `+972${digits}` : '';
 };
 
 export const isExpired = (date: Date, days: number = 30): boolean => {
