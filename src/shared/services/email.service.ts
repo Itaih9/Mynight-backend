@@ -278,11 +278,14 @@ class EmailService {
     coupleName: string;
     eventCode: string;
     weddingDate: Date;
+    phoneNumber?: string;
   }): Promise<void> {
     const link = `${env.FRONTEND_URL}/camera/${opts.eventCode}`;
     const dateLabel = new Date(opts.weddingDate).toLocaleDateString('he-IL');
+    // Show the number in familiar local form (+972501234567 -> 0501234567).
+    const phoneLocal = opts.phoneNumber ? opts.phoneNumber.replace(/^\+972/, '0') : '';
     const body = `
-      <h1 style="margin:0 0 12px 0;font-size:24px;font-weight:700;color:${BRAND.primary};">פלאש שלכם מוכן 📸</h1>
+      <h1 style="margin:0 0 12px 0;font-size:24px;font-weight:700;color:${BRAND.primary};">הפלאש שלכם מוכן 📸</h1>
       <p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:${BRAND.text};">${opts.coupleName}, מזל טוב! הכנו לכם מצלמה חד-פעמית לאורחים לחתונה ב-${dateLabel}.</p>
       <div style="background:${BRAND.bg};border-right:3px solid ${BRAND.accent};border-radius:8px;padding:18px 22px;margin:24px 0;">
         <p style="margin:0 0 10px 0;font-size:14px;font-weight:700;color:${BRAND.primary};">הקישור לאורחים</p>
@@ -291,17 +294,17 @@ class EmailService {
       </div>
       ${button(link, 'לצפייה במצלמה')}
       <p style="margin:0 0 4px 0;font-size:14px;line-height:1.8;color:${BRAND.text};"><strong>איך רואים את התמונות?</strong></p>
-      <p style="margin:0 0 20px 0;font-size:14px;line-height:1.8;color:${BRAND.muted};">בבוקר שאחרי החתונה, היכנסו ל-<a href="${env.FRONTEND_URL}/login" style="color:${BRAND.accentDark};">${env.FRONTEND_URL.replace(/^https?:\/\//, '')}/login</a> עם מספר הטלפון הזה — האלבום שלכם יחכה שם.</p>
+      <p style="margin:0 0 20px 0;font-size:14px;line-height:1.8;color:${BRAND.muted};">בבוקר שאחרי החתונה, היכנסו ל-<a href="${env.FRONTEND_URL}/login" style="color:${BRAND.accentDark};">${env.FRONTEND_URL.replace(/^https?:\/\//, '')}/login</a> עם מספר הטלפון ${phoneLocal ? `<strong style="color:${BRAND.text};" dir="ltr">${phoneLocal}</strong>` : 'שאיתו נרשמתם'} — האלבום שלכם יחכה שם.</p>
       <div style="background:#fff;border:1px solid ${BRAND.bg};border-radius:8px;padding:18px 22px;margin:28px 0 0 0;">
         <p style="margin:0 0 8px 0;font-size:15px;font-weight:700;color:${BRAND.primary};">רוצים שכל אורח יקבל את התמונות שלו?</p>
         <p style="margin:0 0 14px 0;font-size:14px;line-height:1.8;color:${BRAND.text};">פלאש אוסף את הצילומים. <strong>Here I Am</strong> מוסיף זיהוי פנים — כל אורח מקבל אלבום אישי רק עם התמונות שהוא מופיע בהן, כולל התמונות מהצלם המקצועי.</p>
-        ${button(`${env.FRONTEND_URL}/here-i-am`, 'שדרוג ל-Here I Am')}
+        ${button(`${env.FRONTEND_URL}/here-i-am`, 'שדרוג לחבילת my night')}
       </div>
       <p style="margin:24px 0 0 0;font-size:14px;color:${BRAND.muted};">יש שאלה? פשוט השיבו למייל הזה.</p>
     `;
     await this.sendEmail({
       to: opts.to,
-      subject: `פלאש שלכם מוכן — ${opts.coupleName} 📸`,
+      subject: `הפלאש שלכם מוכן — ${opts.coupleName} 📸`,
       htmlBody: renderLayout({ preheader: `הקישור למצלמה של האורחים מוכן.`, body, dir: 'rtl' }),
     });
   }
@@ -332,7 +335,7 @@ class EmailService {
         </ul>
       </div>
       <p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:${BRAND.text};">זה בדיוק מה ש-<strong>Here I Am</strong> עושה. אפשר לשדרג עד ליום החתונה.</p>
-      ${button(`${env.FRONTEND_URL}/here-i-am`, 'שדרוג ל-Here I Am')}
+      ${button(`${env.FRONTEND_URL}/here-i-am`, 'שדרוג לחבילת my night')}
       <p style="margin:24px 0 0 0;font-size:13px;color:${BRAND.muted};">לא מעוניינים? אפשר להתעלם — פלאש נשאר שלכם בחינם.</p>
     `;
     await this.sendEmail({

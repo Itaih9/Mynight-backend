@@ -190,6 +190,9 @@ class EventsService {
           coupleName: data.coupleName,
           eventCode,
           weddingDate: data.weddingDate,
+          // The canonical number the account logs in with — shown in the email
+          // so the couple knows exactly which number opens their album.
+          phoneNumber: user.phoneNumber,
         });
       }
     } catch (err) {
