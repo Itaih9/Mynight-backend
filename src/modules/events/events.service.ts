@@ -207,7 +207,12 @@ class EventsService {
    * Deliberately stops at the wedding date: couples don't buy once the day has
    * passed, so chasing them afterwards only burns goodwill.
    */
-  async runUpsellSweep(): Promise<{ checked: number; sent: number }> {
+  async runUpsellSweep(opts: { dryRun?: boolean } = {}): Promise<{
+    checked: number;
+    sent: number;
+    recipients: { eventCode: string; coupleName: string; email: string; daysOut: number; stage: string }[];
+  }> {
+    const recipients: { eventCode: string; coupleName: string; email: string; daysOut: number; stage: string }[] = [];
     const STAGES: { key: string; daysBefore: number }[] = [
       { key: 'd60', daysBefore: 60 },
       { key: 'd30', daysBefore: 30 },
@@ -238,6 +243,19 @@ class EventsService {
       try {
         const user = await User.findById(event.userId);
         if (!user?.email) continue;
+
+        recipients.push({
+          eventCode: event.eventCode,
+          coupleName: event.name,
+          email: user.email,
+          daysOut,
+          stage: stage.key,
+        });
+
+        // Dry run reports who would be mailed without sending or marking, so a
+        // preview can be run safely against live data.
+        if (opts.dryRun) continue;
+
         const { emailService } = await import('@/shared/services/email.service');
         await emailService.sendFlashUpsellEmail({
           to: user.email,
@@ -253,7 +271,16 @@ class EventsService {
       }
     }
 
-    return { checked: events.length, sent };
+    return { checked: events.length, sent, recipients };
+  }
+
+  /**
+   * Clear a single event's upsell history so a stage can be re-tested. Test-only:
+   * on a live event this will re-send stages the couple has already received.
+   */
+  async resetUpsellHistory(eventId: string): Promise<void> {
+    await Event.updateOne({ _id: eventId }, { $set: { upsellsSent: [] } });
+    logger.warn(`Upsell history reset for event ${eventId}`);
   }
 
   /**

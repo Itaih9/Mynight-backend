@@ -47,6 +47,12 @@ router.patch('/events/:eventId/extend', adminProtect, adminController.extendEven
 router.patch('/events/:eventId/slug', adminProtect, adminController.updateEventSlug);
 router.patch('/events/:eventId/photographer', adminProtect, adminController.updateEventPhotographer);
 router.patch('/events/:eventId/disposable', adminProtect, adminController.updateEventDisposable);
+
+// Promotion email tooling — preview before sending, send on demand, test to self.
+router.get('/promotions/preview', adminProtect, adminController.previewPromotions);
+router.post('/promotions/run', adminProtect, adminController.runPromotions);
+router.post('/promotions/test', adminProtect, adminController.sendTestPromotion);
+router.post('/promotions/:eventId/reset', adminProtect, adminController.resetPromotionHistory);
 router.delete('/events/:eventId', adminProtect, adminController.deleteEvent);
 router.get('/events/:eventId/guest-list-download', adminProtect, adminController.downloadGuestList);
 router.get('/events/:eventId/guest-list-data', adminProtect, adminController.getGuestListData);
