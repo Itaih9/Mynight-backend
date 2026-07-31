@@ -52,6 +52,7 @@ router.patch('/events/:eventId/disposable', adminProtect, adminController.update
 // Email campaigns — audience, timing and copy are all admin-editable.
 router.get('/campaigns', adminProtect, emailCampaignController.list);
 router.post('/campaigns', adminProtect, emailCampaignController.create);
+router.get('/campaigns/wa-templates', adminProtect, emailCampaignController.waTemplates);
 router.get('/campaigns/contacts', adminProtect, emailCampaignController.contacts);
 router.get('/campaigns/preview', adminProtect, emailCampaignController.preview);
 router.post('/campaigns/run', adminProtect, emailCampaignController.run);

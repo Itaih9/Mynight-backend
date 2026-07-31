@@ -41,6 +41,16 @@ export interface IEmailCampaign extends Document {
   };
   subject: string;
   blocks: ICampaignBlocks;
+  /**
+   * WhatsApp copy is NOT authored here: outside the 24h window Meta only allows
+   * pre-approved templates, so we reference one by name and map its named
+   * variables. Values support the same {{tokens}} as the email fields.
+   */
+  channel: 'email' | 'whatsapp' | 'both';
+  whatsapp?: {
+    templateName?: string;
+    parameters?: { name: string; value: string }[];
+  };
   isActive: boolean;
   sentCount: number;
   createdAt: Date;
@@ -79,6 +89,11 @@ const emailCampaignSchema = new Schema<IEmailCampaign>(
       ctaText: { type: String },
       ctaUrl: { type: String },
       footnote: { type: String },
+    },
+    channel: { type: String, enum: ['email', 'whatsapp', 'both'], default: 'email' },
+    whatsapp: {
+      templateName: { type: String },
+      parameters: [{ name: String, value: String }],
     },
     isActive: { type: Boolean, default: true },
     sentCount: { type: Number, default: 0 },

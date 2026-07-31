@@ -13,6 +13,7 @@ interface Recipient {
   eventCode: string;
   coupleName: string;
   email: string;
+  phone: string;
   daysToWedding: number | null;
   daysSinceSignup: number;
 }
@@ -174,7 +175,7 @@ class EmailCampaignService {
         if (typeof f.maxDaysToWedding === 'number' && (daysToWedding ?? Infinity) > f.maxDaysToWedding) continue;
       }
 
-      const user = await User.findById(event.userId).select('email').lean();
+      const user = await User.findById(event.userId).select('email phoneNumber').lean();
       const email = (user as any)?.email;
       if (f.requireEmail !== false && !email) continue;
 
@@ -183,6 +184,7 @@ class EmailCampaignService {
         eventCode: event.eventCode,
         coupleName: event.name,
         email,
+        phone: (user as any)?.phoneNumber || '',
         daysToWedding,
         daysSinceSignup,
       });
@@ -250,13 +252,39 @@ class EmailCampaignService {
       if (opts.dryRun) continue;
 
       const { emailService } = await import('@/shared/services/email.service');
+      const { whatsappService } = await import('@/shared/services/whatsapp.service');
+      const channel = campaign.channel || 'email';
+
       for (const r of pending) {
         try {
-          await emailService.sendCampaignEmail({
-            to: r.email,
-            subject: this.fill(campaign.subject, r),
-            blocks: this.fillBlocks(campaign.blocks, r),
-          });
+          if (channel === 'email' || channel === 'both') {
+            await emailService.sendCampaignEmail({
+              to: r.email,
+              subject: this.fill(campaign.subject, r),
+              blocks: this.fillBlocks(campaign.blocks, r),
+            });
+          }
+
+          if (channel === 'whatsapp' || channel === 'both') {
+            const tpl = campaign.whatsapp?.templateName;
+            if (!tpl) throw new Error('No WhatsApp template configured on this campaign');
+            if (!r.phone) {
+              // On 'both' the email already went out; don't fail the whole send
+              // just because we lack a number.
+              if (channel === 'whatsapp') throw new Error('Recipient has no phone number');
+              logger.warn(`No phone for ${r.coupleName}; WhatsApp skipped`);
+            } else {
+              await whatsappService.sendTemplate({
+                to: r.phone,
+                templateName: tpl,
+                broadcastName: campaign.name,
+                parameters: (campaign.whatsapp?.parameters || []).map((p) => ({
+                  name: p.name,
+                  value: this.fill(p.value, r),
+                })),
+              });
+            }
+          }
           // Log first-class: the unique index is what stops a double send.
           await EmailSendLog.create({
             campaignId: campaign._id,
@@ -274,8 +302,11 @@ class EmailCampaignService {
     return { sent, results };
   }
 
-  /** Send one campaign to an arbitrary address with sample data. */
-  async sendTest(campaignId: string, to: string): Promise<void> {
+  /**
+   * Send one campaign to an arbitrary destination with sample data. `to` is an
+   * email address, or a phone number when testing the WhatsApp side.
+   */
+  async sendTest(campaignId: string, to: string, channel: 'email' | 'whatsapp' = 'email'): Promise<void> {
     const campaign = await EmailCampaign.findById(campaignId);
     if (!campaign) throw new NotFoundError('Campaign');
 
@@ -284,9 +315,26 @@ class EmailCampaignService {
       eventCode: 'TESTCODE',
       coupleName: 'דנה & יואב',
       email: to,
+      phone: to,
       daysToWedding: campaign.trigger.days ?? 30,
       daysSinceSignup: 3,
     };
+
+    if (channel === 'whatsapp') {
+      const tpl = campaign.whatsapp?.templateName;
+      if (!tpl) throw new NotFoundError('WhatsApp template on this campaign');
+      const { whatsappService } = await import('@/shared/services/whatsapp.service');
+      await whatsappService.sendTemplate({
+        to,
+        templateName: tpl,
+        broadcastName: `TEST ${campaign.name}`,
+        parameters: (campaign.whatsapp?.parameters || []).map((p) => ({
+          name: p.name,
+          value: this.fill(p.value, sample),
+        })),
+      });
+      return;
+    }
 
     const { emailService } = await import('@/shared/services/email.service');
     await emailService.sendCampaignEmail({

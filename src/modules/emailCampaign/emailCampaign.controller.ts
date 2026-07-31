@@ -27,6 +27,14 @@ export class EmailCampaignController {
     } catch (error) { next(error); }
   }
 
+  /** WhatsApp templates available in the Wati account. */
+  async waTemplates(_req: Request, res: Response, next: NextFunction) {
+    try {
+      const { whatsappService } = await import('@/shared/services/whatsapp.service');
+      res.json({ success: true, data: { configured: whatsappService.isConfigured, templates: await whatsappService.listTemplates() } });
+    } catch (error) { next(error); }
+  }
+
   /** Searchable contact list for the recipient picker. */
   async contacts(req: Request, res: Response, next: NextFunction) {
     try {
@@ -58,13 +66,14 @@ export class EmailCampaignController {
 
   async sendTest(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const { to } = req.body || {};
-      if (!to || !String(to).includes('@')) {
-        res.status(400).json({ success: false, error: 'A valid "to" address is required' });
+      const { to, channel } = req.body || {};
+      const ch = channel === 'whatsapp' ? 'whatsapp' : 'email';
+      if (!to || (ch === 'email' && !String(to).includes('@'))) {
+        res.status(400).json({ success: false, error: 'A valid destination is required' });
         return;
       }
-      await emailCampaignService.sendTest(req.params.id, String(to));
-      res.json({ success: true, data: { sent: true, to } });
+      await emailCampaignService.sendTest(req.params.id, String(to), ch);
+      res.json({ success: true, data: { sent: true, to, channel: ch } });
     } catch (error) { next(error); }
   }
 

@@ -22,6 +22,10 @@ interface EnvConfig {
   SES_EMAIL_FROM: string;
   SES_REGION: string;
   SENDGRID_API_KEY?: string;
+  // Wati (WhatsApp Business API). Endpoint includes the tenant id, e.g.
+  // https://live-mt-server.wati.io/123456
+  WATI_API_ENDPOINT?: string;
+  WATI_ACCESS_TOKEN?: string;
   SENDGRID_FROM_EMAIL?: string;
   SENDGRID_FROM_NAME?: string;
   // Where new-payment notifications are sent.
@@ -58,6 +62,8 @@ export const env: EnvConfig = {
   SES_EMAIL_FROM: getEnv('SES_EMAIL_FROM'),
   SES_REGION: getEnv('SES_REGION', 'us-east-1'),
   SENDGRID_API_KEY: process.env.SENDGRID_API_KEY,
+  WATI_API_ENDPOINT: process.env.WATI_API_ENDPOINT,
+  WATI_ACCESS_TOKEN: process.env.WATI_ACCESS_TOKEN,
   SENDGRID_FROM_EMAIL: process.env.SENDGRID_FROM_EMAIL,
   SENDGRID_FROM_NAME: process.env.SENDGRID_FROM_NAME,
   ADMIN_NOTIFY_EMAIL: process.env.ADMIN_NOTIFY_EMAIL || 'itaih9@gmail.com',
