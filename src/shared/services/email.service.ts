@@ -229,6 +229,8 @@ class EmailService {
         <p style="margin:0;font-size:13px;color:${BRAND.muted};">כל אורח מקבל 16 צילומים. בלי לראות, בלי לחזור אחורה — הכל מתפתח בבוקר שאחרי.</p>
       </div>
       ${button(link, 'לצפייה במצלמה')}
+      <p style="margin:0 0 4px 0;font-size:14px;line-height:1.8;color:${BRAND.text};"><strong>איך רואים את התמונות?</strong></p>
+      <p style="margin:0 0 20px 0;font-size:14px;line-height:1.8;color:${BRAND.muted};">בבוקר שאחרי החתונה, היכנסו ל-<a href="${env.FRONTEND_URL}/login" style="color:${BRAND.accentDark};">${env.FRONTEND_URL.replace(/^https?:\/\//, '')}/login</a> עם מספר הטלפון הזה — האלבום שלכם יחכה שם.</p>
       <div style="background:#fff;border:1px solid ${BRAND.bg};border-radius:8px;padding:18px 22px;margin:28px 0 0 0;">
         <p style="margin:0 0 8px 0;font-size:15px;font-weight:700;color:${BRAND.primary};">רוצים שכל אורח יקבל את התמונות שלו?</p>
         <p style="margin:0 0 14px 0;font-size:14px;line-height:1.8;color:${BRAND.text};">פלאש אוסף את הצילומים. <strong>Here I Am</strong> מוסיף זיהוי פנים — כל אורח מקבל אלבום אישי רק עם התמונות שהוא מופיע בהן, כולל התמונות מהצלם המקצועי.</p>

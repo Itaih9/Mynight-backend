@@ -3,7 +3,7 @@ import { User } from '../auth/user.model';
 import { Photo } from '../photos/photos.model';
 import { rekognitionService } from '../rekognition/rekognition.service';
 import { couponService } from '../coupon/coupon.service';
-import { generateEventCode, generateRandomSlugSuffix } from '@/shared/utils/helpers';
+import { generateEventCode, generateRandomSlugSuffix, formatPhoneNumber } from '@/shared/utils/helpers';
 import { NotFoundError, ValidationError } from '@/shared/utils/errors';
 import logger from '@/shared/utils/logger';
 import { s3 } from '@/shared/config/aws';
@@ -114,16 +114,19 @@ class EventsService {
    * The event is marked `source: 'flash_free'` so the pre-wedding upsell sweep
    * can find it, and stays `isPaid: false` until they buy.
    *
-   * Idempotent per phone: a couple who signs up twice gets their existing free
-   * event back rather than a duplicate.
+   * Idempotent per phone: a couple who signs up twice gets their existing event
+   * back rather than a duplicate — including a PAID one, so a paying couple who
+   * lands on /flash never ends up with their photos split across two events.
    */
   async registerFreeFlash(data: {
     coupleName: string;
     weddingDate: Date;
     phoneNumber: string;
-    email?: string;
+    email: string;
   }): Promise<{ event: IEvent; isNew: boolean }> {
-    const phone = data.phoneNumber.trim();
+    // Must match how auth stores numbers (+972…), or the account we create here
+    // can never be logged into and every login mints a second, orphaned user.
+    const phone = formatPhoneNumber(data.phoneNumber);
 
     let user = await User.findOne({ phoneNumber: phone });
     if (!user) {
@@ -143,7 +146,9 @@ class EventsService {
       if (Object.keys(patch).length) await User.updateOne({ _id: user._id }, patch);
     }
 
-    const existing = await Event.findOne({ userId: user._id, source: 'flash_free' });
+    // Reuse ANY existing event for this couple, paid or free — creating a second
+    // one would scatter their guests' photos across two galleries.
+    const existing = await Event.findOne({ userId: user._id }).sort({ createdAt: -1 });
     if (existing) {
       if (!existing.disposableEnabled) {
         existing.disposableEnabled = true;

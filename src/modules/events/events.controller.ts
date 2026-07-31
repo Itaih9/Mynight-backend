@@ -183,9 +183,22 @@ export class EventsController {
         res.status(400).json({ success: false, error: 'מספר טלפון נדרש' });
         return;
       }
+      // Email is required, not optional: the entire pre-wedding upsell sequence
+      // is delivered by mail, so a signup without one is a lead we can never
+      // reach — the funnel would fail silently.
+      if (!email || !String(email).trim()) {
+        res.status(400).json({ success: false, error: 'אימייל נדרש' });
+        return;
+      }
       const date = new Date(weddingDate);
       if (!weddingDate || isNaN(date.getTime())) {
         res.status(400).json({ success: false, error: 'תאריך חתונה נדרש' });
+        return;
+      }
+      // A past date would expire the event on creation and make it invisible to
+      // the upsell sweep, which only looks forward.
+      if (date.getTime() < Date.now() - 24 * 60 * 60 * 1000) {
+        res.status(400).json({ success: false, error: 'תאריך החתונה חייב להיות בעתיד' });
         return;
       }
 
@@ -193,7 +206,7 @@ export class EventsController {
         coupleName: String(coupleName).trim(),
         weddingDate: date,
         phoneNumber: String(phoneNumber).trim(),
-        email: email ? String(email).trim() : undefined,
+        email: String(email).trim(),
       });
 
       res.status(isNew ? 201 : 200).json({
