@@ -27,6 +27,14 @@ export class EmailCampaignController {
     } catch (error) { next(error); }
   }
 
+  /** Searchable contact list for the recipient picker. */
+  async contacts(req: Request, res: Response, next: NextFunction) {
+    try {
+      const rows = await emailCampaignService.listContacts(String(req.query.search || ''));
+      res.json({ success: true, data: rows });
+    } catch (error) { next(error); }
+  }
+
   /** Dry run — who would receive what, right now. Sends nothing. */
   async preview(req: Request, res: Response, next: NextFunction) {
     try {

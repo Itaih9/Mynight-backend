@@ -8,7 +8,7 @@ import mongoose, { Document, Schema } from 'mongoose';
  * blocks rather than raw HTML, so every send inherits the branded RTL layout and
  * a bad tag can't break rendering in Outlook.
  */
-export type CampaignAudience = 'flash_free_unpaid' | 'paid' | 'all_couples';
+export type CampaignAudience = 'flash_free_unpaid' | 'paid' | 'all_couples' | 'manual';
 export type CampaignTriggerType = 'before_wedding' | 'after_signup' | 'fixed_date';
 
 export interface ICampaignBlocks {
@@ -23,6 +23,10 @@ export interface ICampaignBlocks {
 export interface IEmailCampaign extends Document {
   name: string;
   audience: CampaignAudience;
+  /** Hand-picked events. The whole audience when `audience` is 'manual'. */
+  recipientEventIds: mongoose.Types.ObjectId[];
+  /** Always removed from the audience, whichever preset is in use. */
+  excludeEventIds: mongoose.Types.ObjectId[];
   filters: {
     minDaysToWedding?: number;
     maxDaysToWedding?: number;
@@ -48,9 +52,11 @@ const emailCampaignSchema = new Schema<IEmailCampaign>(
     name: { type: String, required: true, trim: true },
     audience: {
       type: String,
-      enum: ['flash_free_unpaid', 'paid', 'all_couples'],
+      enum: ['flash_free_unpaid', 'paid', 'all_couples', 'manual'],
       default: 'flash_free_unpaid',
     },
+    recipientEventIds: [{ type: Schema.Types.ObjectId, ref: 'Event' }],
+    excludeEventIds: [{ type: Schema.Types.ObjectId, ref: 'Event' }],
     filters: {
       minDaysToWedding: { type: Number },
       maxDaysToWedding: { type: Number },

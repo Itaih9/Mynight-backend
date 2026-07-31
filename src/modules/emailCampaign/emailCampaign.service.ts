@@ -81,6 +81,45 @@ class EmailCampaignService {
     return EmailSendLog.find({ campaignId }).sort({ sentAt: -1 }).limit(limit).lean();
   }
 
+  /**
+   * Searchable contact list for the picker — one row per couple/event, with
+   * everything needed to decide whether to include them.
+   */
+  async listContacts(search = '', limit = 200) {
+    const events = await Event.find()
+      .select('_id eventCode name weddingDate isPaid source userId createdAt')
+      .sort({ createdAt: -1 })
+      .limit(1000)
+      .lean();
+
+    const userIds = events.map((e) => e.userId);
+    const users = await User.find({ _id: { $in: userIds } }).select('_id email phoneNumber').lean();
+    const byId = new Map(users.map((u: any) => [String(u._id), u]));
+
+    const term = search.trim().toLowerCase();
+    const rows = events.map((e) => {
+      const u: any = byId.get(String(e.userId));
+      return {
+        eventId: String(e._id),
+        eventCode: e.eventCode,
+        coupleName: e.name,
+        email: u?.email || '',
+        phone: u?.phoneNumber || '',
+        weddingDate: e.weddingDate || null,
+        isPaid: !!e.isPaid,
+        source: (e as any).source || 'paid',
+      };
+    });
+
+    const filtered = term
+      ? rows.filter((r) =>
+          [r.coupleName, r.email, r.phone, r.eventCode].some((v) => String(v).toLowerCase().includes(term))
+        )
+      : rows;
+
+    return filtered.slice(0, limit);
+  }
+
   // ---- Audience ------------------------------------------------------------
   /**
    * Resolve the couples a campaign currently applies to. Timing is evaluated
@@ -94,21 +133,30 @@ class EmailCampaignService {
       query.isPaid = false;
     } else if (campaign.audience === 'paid') {
       query.isPaid = true;
+    } else if (campaign.audience === 'manual') {
+      // Hand-picked list IS the audience — no preset, no timing rules applied.
+      query._id = { $in: campaign.recipientEventIds || [] };
     }
 
+    const excluded = new Set((campaign.excludeEventIds || []).map(String));
     const now = Date.now();
     const events = await Event.find(query).lean();
     const out: Recipient[] = [];
 
     for (const event of events) {
+      if (excluded.has(String(event._id))) continue;
       const daysToWedding = event.weddingDate
         ? Math.ceil((new Date(event.weddingDate).getTime() - now) / DAY_MS)
         : null;
       const daysSinceSignup = Math.floor((now - new Date(event.createdAt).getTime()) / DAY_MS);
 
       // --- timing ---
+      // A hand-picked list is an explicit instruction, so timing and window
+      // filters don't apply — otherwise a chosen couple could be silently dropped.
       const t = campaign.trigger;
-      if (t.type === 'before_wedding') {
+      if (campaign.audience === 'manual') {
+        // fall through to the recipient push below
+      } else if (t.type === 'before_wedding') {
         // Matches once the couple is inside the window, and never after the
         // wedding — couples don't buy once the day has passed.
         if (daysToWedding === null || daysToWedding < 0) continue;
@@ -119,10 +167,12 @@ class EmailCampaignService {
         if (!t.date || new Date(t.date).getTime() > now) continue;
       }
 
-      // --- filters ---
+      // --- filters (skipped for hand-picked lists, same reasoning as above) ---
       const f = campaign.filters || ({} as any);
-      if (typeof f.minDaysToWedding === 'number' && (daysToWedding ?? -1) < f.minDaysToWedding) continue;
-      if (typeof f.maxDaysToWedding === 'number' && (daysToWedding ?? Infinity) > f.maxDaysToWedding) continue;
+      if (campaign.audience !== 'manual') {
+        if (typeof f.minDaysToWedding === 'number' && (daysToWedding ?? -1) < f.minDaysToWedding) continue;
+        if (typeof f.maxDaysToWedding === 'number' && (daysToWedding ?? Infinity) > f.maxDaysToWedding) continue;
+      }
 
       const user = await User.findById(event.userId).select('email').lean();
       const email = (user as any)?.email;
