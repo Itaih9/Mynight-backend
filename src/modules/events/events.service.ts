@@ -118,12 +118,17 @@ class EventsService {
    * back rather than a duplicate — including a PAID one, so a paying couple who
    * lands on /flash never ends up with their photos split across two events.
    */
-  async registerFreeFlash(data: {
-    coupleName: string;
-    weddingDate: Date;
-    phoneNumber: string;
-    email: string;
-  }): Promise<{ event: IEvent; isNew: boolean }> {
+  async registerFreeFlash(
+    data: {
+      coupleName: string;
+      weddingDate: Date;
+      phoneNumber: string;
+      email: string;
+    },
+    // Stamp events made via the automation service token so that token can later
+    // delete its own test events — but never a real couple's gallery.
+    opts?: { createdByService?: boolean }
+  ): Promise<{ event: IEvent; isNew: boolean }> {
     // Must match how auth stores numbers (+972…), or the account we create here
     // can never be logged into and every login mints a second, orphaned user.
     const phone = formatPhoneNumber(data.phoneNumber);
@@ -176,6 +181,7 @@ class EventsService {
       isPaid: false,
       source: 'flash_free',
       disposableEnabled: true,
+      createdByService: !!opts?.createdByService,
     });
 
     logger.info(`Free פלאש registered: ${eventCode} for ${data.coupleName} (${phone})`);

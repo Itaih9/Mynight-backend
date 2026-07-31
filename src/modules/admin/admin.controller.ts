@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { adminService } from './admin.service';
+import { AdminRequest } from './admin.middleware';
 import { eventsService } from '../events/events.service';
 import { affiliateService } from '../affiliate/affiliate.service';
 
@@ -361,6 +362,38 @@ export class AdminController {
       res.json({
         success: true,
         message: 'Event deleted successfully',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Create a free פלאש event from the admin API. When the caller is the service
+   * token, the event is stamped createdByService so the token can later delete
+   * it — the only events the token is ever allowed to delete.
+   */
+  async createFlashEvent(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { coupleName, phoneNumber, email, weddingDate } = req.body;
+      if (!coupleName || !phoneNumber || !weddingDate) {
+        res.status(400).json({
+          success: false,
+          message: 'coupleName, phoneNumber and weddingDate are required',
+        });
+        return;
+      }
+      const result = await eventsService.registerFreeFlash(
+        { coupleName, phoneNumber, email, weddingDate: new Date(weddingDate) },
+        { createdByService: !!(req as AdminRequest).isServiceToken }
+      );
+      res.status(result.isNew ? 201 : 200).json({
+        success: true,
+        data: {
+          eventCode: result.event.eventCode,
+          isNew: result.isNew,
+          createdByService: result.event.createdByService,
+        },
       });
     } catch (error) {
       next(error);

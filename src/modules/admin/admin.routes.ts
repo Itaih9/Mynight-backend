@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { adminController } from './admin.controller';
 import { emailCampaignController } from '../emailCampaign/emailCampaign.controller';
-import { adminProtect } from './admin.middleware';
+import { adminProtect, blockServiceToken, requireServiceOwnedEvent } from './admin.middleware';
 import { loginBruteForceLimiter } from '@/shared/middleware/rateLimit.middleware';
 import multer from 'multer';
 
@@ -19,13 +19,15 @@ router.post('/change-password', adminProtect, adminController.changePassword);
 router.get('/admins', adminProtect, adminController.listAdmins);
 router.post('/admins', adminProtect, adminController.createAdmin);
 router.patch('/admins/:adminId/active', adminProtect, adminController.setAdminActive);
-router.delete('/admins/:adminId', adminProtect, adminController.deleteAdmin);
+// Account deletion is barred for the service token.
+router.delete('/admins/:adminId', adminProtect, blockServiceToken, adminController.deleteAdmin);
 
 router.get('/dashboard', adminProtect, adminController.getDashboard);
 router.get('/pending-counts', adminProtect, adminController.getPendingCounts);
 router.get('/users', adminProtect, adminController.getUsers);
 router.patch('/users/:userId/reset-password', adminProtect, adminController.resetUserPassword);
-router.delete('/users/:userId', adminProtect, adminController.deleteUser);
+// Account deletion is barred for the service token.
+router.delete('/users/:userId', adminProtect, blockServiceToken, adminController.deleteUser);
 
 router.get('/withdrawals', adminProtect, adminController.listWithdrawals);
 router.post('/affiliates/:affiliateId/payout', adminProtect, adminController.payoutAffiliate);
@@ -60,17 +62,22 @@ router.patch('/campaigns/:id', adminProtect, emailCampaignController.update);
 router.delete('/campaigns/:id', adminProtect, emailCampaignController.remove);
 router.post('/campaigns/:id/test', adminProtect, emailCampaignController.sendTest);
 router.get('/campaigns/:id/history', adminProtect, emailCampaignController.history);
-router.delete('/events/:eventId', adminProtect, adminController.deleteEvent);
+// The service token creates flash events here so they're stamped as its own
+// (and therefore deletable by it); a human admin may use it too.
+router.post('/events/flash', adminProtect, adminController.createFlashEvent);
+// Destructive event operations: the service token may only touch events it
+// created; a human admin is unaffected by requireServiceOwnedEvent.
+router.delete('/events/:eventId', adminProtect, requireServiceOwnedEvent, adminController.deleteEvent);
 router.get('/events/:eventId/guest-list-download', adminProtect, adminController.downloadGuestList);
 router.get('/events/:eventId/guest-list-data', adminProtect, adminController.getGuestListData);
 
 router.post('/events/:eventId/cover-image', adminProtect, upload.single('coverImage'), adminController.uploadCoverImage);
-router.delete('/events/:eventId/cover-image', adminProtect, adminController.deleteCoverImage);
+router.delete('/events/:eventId/cover-image', adminProtect, requireServiceOwnedEvent, adminController.deleteCoverImage);
 
 router.post('/events/:eventId/photos', adminProtect, upload.array('photos', 100), adminController.uploadPhotosToEvent);
 router.get('/events/:eventId/photos', adminProtect, adminController.getEventPhotos);
-router.delete('/events/:eventId/photos/:photoId', adminProtect, adminController.deleteEventPhoto);
-router.post('/events/:eventId/photos/bulk-delete', adminProtect, adminController.deleteEventPhotosBulk);
+router.delete('/events/:eventId/photos/:photoId', adminProtect, requireServiceOwnedEvent, adminController.deleteEventPhoto);
+router.post('/events/:eventId/photos/bulk-delete', adminProtect, requireServiceOwnedEvent, adminController.deleteEventPhotosBulk);
 
 router.post('/events/:eventId/presigned-urls', adminProtect, adminController.getBatchPresignedUrls);
 router.post('/events/:eventId/complete-batch', adminProtect, adminController.batchCompleteUpload);

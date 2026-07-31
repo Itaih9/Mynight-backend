@@ -34,6 +34,10 @@ interface EnvConfig {
   SUMIT_API_KEY: string;
   SUMIT_PUBLIC_KEY: string;
   INTERNAL_WEBHOOK_SECRET: string;
+  // Static bearer token for automated admin API access (the Claude service
+  // principal). Grants admin-level access EXCEPT deleting accounts or deleting
+  // events it did not create. Unset => service-token auth is disabled entirely.
+  SERVICE_API_TOKEN?: string;
 }
 
 const getEnv = (key: string, defaultValue?: string): string => {
@@ -71,4 +75,5 @@ export const env: EnvConfig = {
   SUMIT_API_KEY: getEnv('SUMIT_API_KEY', ''),
   SUMIT_PUBLIC_KEY: getEnv('SUMIT_PUBLIC_KEY', ''),
   INTERNAL_WEBHOOK_SECRET: getEnv('INTERNAL_WEBHOOK_SECRET', 'change-me-in-production'),
+  SERVICE_API_TOKEN: process.env.SERVICE_API_TOKEN,
 };

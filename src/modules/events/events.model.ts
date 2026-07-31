@@ -45,6 +45,10 @@ export interface IEvent extends Document {
   // Lead-gen: free פלאש signups are the top of the funnel. Which emails a couple
   // has received now lives in EmailSendLog, not here.
   source?: 'flash_free' | 'paid' | 'admin';
+  // True only for events created via the automation service token. That token
+  // may delete an event ONLY when this is true — so it can clean up its own
+  // test events but can never delete a real couple's gallery.
+  createdByService?: boolean;
   sharingPermissions: ISharingPermissions;
   guestListFile?: IGuestListFile;
   guestListUploadCount: number;
@@ -138,6 +142,10 @@ const eventSchema = new Schema<IEvent>(
       type: String,
       enum: ['flash_free', 'paid', 'admin'],
       default: 'paid',
+    },
+    createdByService: {
+      type: Boolean,
+      default: false,
     },
     sharingPermissions: {
       type: {
