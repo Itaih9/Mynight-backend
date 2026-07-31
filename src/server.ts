@@ -3,7 +3,7 @@ import { connectDatabase } from './shared/config/database';
 import { env } from './shared/config/env';
 import logger from './shared/utils/logger';
 import { packagesService } from './modules/packages/packages.service';
-import { eventsService } from './modules/events/events.service';
+import { emailCampaignService } from './modules/emailCampaign/emailCampaign.service';
 
 const startServer = async () => {
   try {
@@ -20,9 +20,10 @@ const startServer = async () => {
       logger.info(`Health check available at http://localhost:${PORT}/health`);
     });
 
-    // Pre-wedding Here I Am upsell for free פלאש couples. Idempotent per stage,
-    // so a restart never re-sends.
-    eventsService.startUpsellScheduler();
+    // Admin-editable promotional emails. Idempotency lives in EmailSendLog, so
+    // a restart never re-sends.
+    await emailCampaignService.seedDefaults();
+    emailCampaignService.startScheduler();
 
     const gracefulShutdown = (signal: string) => {
       logger.info(`${signal} received. Starting graceful shutdown...`);

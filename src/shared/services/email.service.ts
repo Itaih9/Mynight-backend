@@ -213,6 +213,60 @@ class EmailService {
   }
 
   /**
+   * Renders an admin-authored campaign (structured blocks) into the branded RTL
+   * layout and sends it. Authors never touch HTML, so a campaign can't break
+   * rendering; tokens are substituted by the caller before this point.
+   */
+  async sendCampaignEmail(opts: {
+    to: string;
+    subject: string;
+    blocks: {
+      title?: string;
+      paragraphs?: string[];
+      bullets?: string[];
+      ctaText?: string;
+      ctaUrl?: string;
+      footnote?: string;
+    };
+  }): Promise<void> {
+    const b = opts.blocks;
+    const parts: string[] = [];
+
+    if (b.title) {
+      parts.push(`<h1 style="margin:0 0 12px 0;font-size:24px;font-weight:700;color:${BRAND.primary};">${b.title}</h1>`);
+    }
+    for (const p of b.paragraphs || []) {
+      if (!p?.trim()) continue;
+      parts.push(`<p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:${BRAND.text};">${p}</p>`);
+    }
+    const bullets = (b.bullets || []).filter((x) => x?.trim());
+    if (bullets.length) {
+      parts.push(`
+      <div style="background:${BRAND.bg};border-right:3px solid ${BRAND.accent};border-radius:8px;padding:18px 22px;margin:24px 0;">
+        <ul style="margin:0;padding-right:18px;padding-left:0;font-size:14px;line-height:1.9;color:${BRAND.text};">
+          ${bullets.map((x) => `<li>${x}</li>`).join('')}
+        </ul>
+      </div>`);
+    }
+    if (b.ctaText && b.ctaUrl) {
+      parts.push(button(b.ctaUrl, b.ctaText));
+    }
+    if (b.footnote) {
+      parts.push(`<p style="margin:24px 0 0 0;font-size:13px;color:${BRAND.muted};">${b.footnote}</p>`);
+    }
+
+    await this.sendEmail({
+      to: opts.to,
+      subject: opts.subject,
+      htmlBody: renderLayout({
+        preheader: b.paragraphs?.[0]?.slice(0, 120),
+        body: parts.join('\n'),
+        dir: 'rtl',
+      }),
+    });
+  }
+
+  /**
    * Sent when a couple registers for FREE פלאש. Confirms their camera link and
    * plants the Here I Am pitch — free covers the shooting, the paid layer is
    * what finds each guest their own photos.

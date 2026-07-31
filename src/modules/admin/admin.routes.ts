@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { adminController } from './admin.controller';
+import { emailCampaignController } from '../emailCampaign/emailCampaign.controller';
 import { adminProtect } from './admin.middleware';
 import { loginBruteForceLimiter } from '@/shared/middleware/rateLimit.middleware';
 import multer from 'multer';
@@ -48,11 +49,15 @@ router.patch('/events/:eventId/slug', adminProtect, adminController.updateEventS
 router.patch('/events/:eventId/photographer', adminProtect, adminController.updateEventPhotographer);
 router.patch('/events/:eventId/disposable', adminProtect, adminController.updateEventDisposable);
 
-// Promotion email tooling — preview before sending, send on demand, test to self.
-router.get('/promotions/preview', adminProtect, adminController.previewPromotions);
-router.post('/promotions/run', adminProtect, adminController.runPromotions);
-router.post('/promotions/test', adminProtect, adminController.sendTestPromotion);
-router.post('/promotions/:eventId/reset', adminProtect, adminController.resetPromotionHistory);
+// Email campaigns — audience, timing and copy are all admin-editable.
+router.get('/campaigns', adminProtect, emailCampaignController.list);
+router.post('/campaigns', adminProtect, emailCampaignController.create);
+router.get('/campaigns/preview', adminProtect, emailCampaignController.preview);
+router.post('/campaigns/run', adminProtect, emailCampaignController.run);
+router.patch('/campaigns/:id', adminProtect, emailCampaignController.update);
+router.delete('/campaigns/:id', adminProtect, emailCampaignController.remove);
+router.post('/campaigns/:id/test', adminProtect, emailCampaignController.sendTest);
+router.get('/campaigns/:id/history', adminProtect, emailCampaignController.history);
 router.delete('/events/:eventId', adminProtect, adminController.deleteEvent);
 router.get('/events/:eventId/guest-list-download', adminProtect, adminController.downloadGuestList);
 router.get('/events/:eventId/guest-list-data', adminProtect, adminController.getGuestListData);

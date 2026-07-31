@@ -196,113 +196,298 @@ class EventsService {
     return { event, isNew: true };
   }
 
-  /**
-   * Pre-wedding upsell sweep for free פלאש couples.
-   *
-   * Runs on a timer (see startUpsellScheduler). For each unpaid free event whose
-   * wedding falls inside a stage window, sends the Here I Am pitch once and
-   * records the stage key in `upsellsSent` — so restarts, overlapping runs, or a
-   * changed schedule never re-send the same stage.
-   *
-   * Deliberately stops at the wedding date: couples don't buy once the day has
-   * passed, so chasing them afterwards only burns goodwill.
-   */
-  async runUpsellSweep(opts: { dryRun?: boolean } = {}): Promise<{
-    checked: number;
-    sent: number;
-    recipients: { eventCode: string; coupleName: string; email: string; daysOut: number; stage: string }[];
-  }> {
-    const recipients: { eventCode: string; coupleName: string; email: string; daysOut: number; stage: string }[] = [];
-    const STAGES: { key: string; daysBefore: number }[] = [
-      { key: 'd60', daysBefore: 60 },
-      { key: 'd30', daysBefore: 30 },
-      { key: 'd7', daysBefore: 7 },
-    ];
+  // Guest link + calendar reminders for the couple. Never let a mail failure
+  // abort event creation — the event is the thing that matters.
+  private async sendCreationEmail(userId: string, event: IEvent): Promise<void> {
+    try {
+      if (!event.weddingDate) return;
 
-    const now = new Date();
-    const horizon = new Date(now);
-    horizon.setDate(horizon.getDate() + 61);
+      const user = await User.findById(userId).select('email').lean();
+      if (!user?.email) {
+        logger.warn(`No email for user ${userId}; skipping event creation email`);
+        return;
+      }
 
-    const events = await Event.find({
-      source: 'flash_free',
-      isPaid: false,
-      weddingDate: { $gte: now, $lte: horizon },
-    });
+      const { emailService } = await import('@/shared/services/email.service');
+      await emailService.sendEventCreatedEmail(user.email, {
+        eventName: event.name,
+        eventCode: event.eventCode,
+        weddingDate: event.weddingDate,
+      });
+    } catch (err) {
+      logger.error(`Event creation email failed for ${event.eventCode}: ${(err as Error).message}`);
+    }
+  }
 
-    let sent = 0;
-    for (const event of events) {
-      if (!event.weddingDate) continue;
-      const daysOut = Math.ceil(
-        (new Date(event.weddingDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-      );
-      // Pick the most urgent stage this event has entered but not yet been sent.
-      const stage = STAGES.filter((s) => daysOut <= s.daysBefore)
-        .sort((a, b) => a.daysBefore - b.daysBefore)[0];
-      if (!stage || (event.upsellsSent || []).includes(stage.key)) continue;
+  async getEvent(eventId: string): Promise<IEvent> {
+    const event = await Event.findById(eventId);
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
 
-      try {
-        const user = await User.findById(event.userId);
-        if (!user?.email) continue;
+    if (this.isExpired(event)) {
+      throw new ValidationError('Event has expired');
+    }
 
-        recipients.push({
-          eventCode: event.eventCode,
-          coupleName: event.name,
-          email: user.email,
-          daysOut,
-          stage: stage.key,
-        });
+    return event;
+  }
 
-        // Dry run reports who would be mailed without sending or marking, so a
-        // preview can be run safely against live data.
-        if (opts.dryRun) continue;
+  async getEventByCode(eventCode: string): Promise<IEvent> {
+    const event = await Event.findOne({ eventCode: eventCode.toUpperCase() });
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
 
-        const { emailService } = await import('@/shared/services/email.service');
-        await emailService.sendFlashUpsellEmail({
-          to: user.email,
-          coupleName: event.name,
-          eventCode: event.eventCode,
-          daysUntilWedding: daysOut,
-        });
-        await Event.updateOne({ _id: event._id }, { $addToSet: { upsellsSent: stage.key } });
-        sent++;
-        logger.info(`Upsell ${stage.key} sent for free פלאש event ${event.eventCode}`);
-      } catch (err) {
-        logger.error(`Upsell sweep failed for ${event.eventCode}: ${(err as Error).message}`);
+    if (this.isExpired(event)) {
+      throw new ValidationError('Event has expired');
+    }
+
+    return event;
+  }
+
+  async getEventBySlug(slug: string): Promise<IEvent> {
+    const event = await Event.findOne({ customSlug: slug.toLowerCase() });
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
+
+    if (this.isExpired(event)) {
+      throw new ValidationError('Event has expired');
+    }
+
+    return event;
+  }
+
+  async getEventByCodeOrSlug(identifier: string): Promise<IEvent> {
+    let event = await Event.findOne({ customSlug: identifier.toLowerCase() });
+
+    if (!event) {
+      event = await Event.findOne({ eventCode: identifier.toUpperCase() });
+    }
+
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
+
+    if (this.isExpired(event)) {
+      throw new ValidationError('Event has expired');
+    }
+
+    if (!event.weddingDate) {
+      const user = await User.findById(event.userId).select('weddingDate');
+      if (user?.weddingDate) {
+        event.weddingDate = user.weddingDate;
+        await event.save();
       }
     }
 
-    return { checked: events.length, sent, recipients };
+    return event;
   }
 
-  /**
-   * Clear a single event's upsell history so a stage can be re-tested. Test-only:
-   * on a live event this will re-send stages the couple has already received.
-   */
-  async resetUpsellHistory(eventId: string): Promise<void> {
-    await Event.updateOne({ _id: eventId }, { $set: { upsellsSent: [] } });
-    logger.warn(`Upsell history reset for event ${eventId}`);
+  async getUserEvents(userId: string): Promise<IEvent[]> {
+    const events = await Event.find({ userId }).sort({ createdAt: -1 });
+    return events;
   }
 
-  /**
-   * Timer-based scheduler. Deliberately not a cron dependency: a plain interval
-   * plus the `upsellsSent` idempotency guard is enough here, survives pm2
-   * restarts, and adds nothing to install.
-   */
-  startUpsellScheduler(): void {
-    const SIX_HOURS = 6 * 60 * 60 * 1000;
-    const run = () => {
-      this.runUpsellSweep()
-        .then((r) => {
-          if (r.sent) logger.info(`Upsell sweep: ${r.sent}/${r.checked} sent`);
+  async deleteEvent(eventId: string, userId: string): Promise<void> {
+    const event = await Event.findOne({ _id: eventId, userId });
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
+
+    await this.purgeEvent(event);
+
+    logger.info(`Event deleted: ${event.eventCode} by user ${userId}`);
+  }
+
+  async adminDeleteEvent(eventId: string): Promise<void> {
+    const event = await Event.findById(eventId);
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
+
+    await this.purgeEvent(event);
+
+    logger.info(`Event deleted by admin: ${event.eventCode}`);
+  }
+
+  private async purgeEvent(event: IEvent): Promise<void> {
+    await rekognitionService.deleteCollection(event.collectionId);
+
+    await this.deleteS3Prefix(`events/${event.eventCode}/`);
+    await this.deleteS3Prefix(`thumbnails/events/${event.eventCode}/`);
+
+    await Photo.deleteMany({ eventId: event._id });
+
+    await Event.findByIdAndDelete(event._id);
+  }
+
+  private async deleteS3Prefix(prefix: string): Promise<void> {
+    try {
+      let continuationToken: string | undefined;
+      do {
+        const listed = await s3
+          .listObjectsV2({
+            Bucket: env.S3_BUCKET_NAME,
+            Prefix: prefix,
+            ContinuationToken: continuationToken,
+          })
+          .promise();
+
+        const objects = (listed.Contents || [])
+          .map((o) => ({ Key: o.Key! }))
+          .filter((o) => !!o.Key);
+
+        if (objects.length > 0) {
+          await s3
+            .deleteObjects({
+              Bucket: env.S3_BUCKET_NAME,
+              Delete: { Objects: objects, Quiet: true },
+            })
+            .promise();
+        }
+
+        continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+      } while (continuationToken);
+    } catch (err: any) {
+      logger.error(`Failed to delete S3 objects under prefix ${prefix}: ${err.message}`);
+    }
+  }
+
+  async updateSlug(eventId: string, userId: string, customSlug: string): Promise<IEvent> {
+    const event = await Event.findOne({ _id: eventId, userId });
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
+
+    if ((event.slugChangeCount ?? 0) >= 3) {
+      throw new ValidationError('Slug change limit reached. Please contact support to make further changes.');
+    }
+
+    const existing = await Event.findOne({ customSlug, _id: { $ne: eventId } });
+    if (existing) {
+      throw new ValidationError('Slug already in use');
+    }
+
+    event.customSlug = customSlug;
+    event.slugChangeCount = (event.slugChangeCount ?? 0) + 1;
+    await event.save();
+
+    logger.info(`Slug updated to ${customSlug} (change #${event.slugChangeCount}) for event ${event.eventCode} by user ${userId}`);
+    return event;
+  }
+
+  async updateSharingPermissions(
+    eventId: string,
+    userId: string,
+    permissions: { showProPhotos?: boolean; showGuestPhotos?: boolean; showGuestStories?: boolean }
+  ): Promise<IEvent> {
+    const event = await Event.findOne({ _id: eventId, userId });
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
+
+    const updatedEvent = await Event.findByIdAndUpdate(
+      eventId,
+      {
+        $set: {
+          'sharingPermissions.showProPhotos': permissions.showProPhotos ?? event.sharingPermissions.showProPhotos,
+          'sharingPermissions.showGuestPhotos': permissions.showGuestPhotos ?? event.sharingPermissions.showGuestPhotos,
+          'sharingPermissions.showGuestStories': permissions.showGuestStories ?? event.sharingPermissions.showGuestStories,
+        },
+      },
+      { new: true }
+    );
+
+    logger.info(`Sharing permissions updated for event ${event.eventCode}`);
+
+    return updatedEvent!;
+  }
+
+  async uploadGuestListFile(
+    eventId: string,
+    userId: string,
+    file: Express.Multer.File
+  ): Promise<IGuestListFile> {
+    const event = await Event.findOne({ _id: eventId, userId });
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
+
+    if (event.guestListFile?.s3Key) {
+      await s3
+        .deleteObject({
+          Bucket: env.S3_BUCKET_NAME,
+          Key: event.guestListFile.s3Key,
         })
-        .catch((err) => logger.error(`Upsell sweep crashed: ${(err as Error).message}`));
+        .promise();
+      logger.debug(`Deleted old guest list file: ${event.guestListFile.s3Key}`);
+    }
+
+    const originalName = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    const ext = originalName.includes('.') ? originalName.split('.').pop() : '';
+    const s3Key = `events/${event.eventCode}/guest-list/${Date.now()}-guest-list${ext ? `.${ext}` : ''}`;
+
+    await s3
+      .putObject({
+        Bucket: env.S3_BUCKET_NAME,
+        Key: s3Key,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+      })
+      .promise();
+
+    const guestListFile: IGuestListFile = {
+      s3Key,
+      originalName,
+      size: file.size,
+      mimeType: file.mimetype,
+      uploadedAt: new Date(),
     };
-    setTimeout(run, 60_000); // let the app finish booting first
-    setInterval(run, SIX_HOURS);
-    logger.info('Free-פלאש upsell scheduler started (every 6h)');
+
+    await Event.findByIdAndUpdate(eventId, {
+      guestListFile,
+      $inc: { guestListUploadCount: 1 },
+    });
+
+    logger.info(`Guest list file uploaded for event ${event.eventCode}: ${originalName}`);
+
+    return guestListFile;
   }
 
-  // Guest link + calendar reminders for the couple. Never let a mail failure
+  async deleteGuestListFile(eventId: string, userId: string): Promise<void> {
+    const event = await Event.findOne({ _id: eventId, userId });
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
+
+    if (!event.guestListFile?.s3Key) {
+      throw new ValidationError('No guest list file exists');
+    }
+
+    await s3
+      .deleteObject({
+        Bucket: env.S3_BUCKET_NAME,
+        Key: event.guestListFile.s3Key,
+      })
+      .promise();
+
+    await Event.findByIdAndUpdate(eventId, { $unset: { guestListFile: 1 } });
+
+    logger.info(`Guest list file deleted for event ${event.eventCode}`);
+  }
+
+  async getGuestListFile(eventId: string, userId: string): Promise<IGuestListFile | null> {
+    const event = await Event.findOne({ _id: eventId, userId });
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
+
+    return event.guestListFile || null;
+  }
+}
+
+export const eventsService = new EventsService();  // Guest link + calendar reminders for the couple. Never let a mail failure
   // abort event creation — the event is the thing that matters.
   private async sendCreationEmail(userId: string, event: IEvent): Promise<void> {
     try {
