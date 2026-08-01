@@ -297,7 +297,7 @@ class EmailService {
       <p style="margin:0 0 20px 0;font-size:14px;line-height:1.8;color:${BRAND.muted};">בבוקר שאחרי החתונה, היכנסו ל-<a href="${env.FRONTEND_URL}/login" style="color:${BRAND.accentDark};">${env.FRONTEND_URL.replace(/^https?:\/\//, '')}/login</a> עם מספר הטלפון ${phoneLocal ? `<strong style="color:${BRAND.text};" dir="ltr">${phoneLocal}</strong>` : 'שאיתו נרשמתם'} — האלבום שלכם יחכה שם.</p>
       <div style="background:#fff;border:1px solid ${BRAND.bg};border-radius:8px;padding:18px 22px;margin:28px 0 0 0;">
         <p style="margin:0 0 8px 0;font-size:15px;font-weight:700;color:${BRAND.primary};">רוצים שכל אורח יקבל את התמונות שלו?</p>
-        <p style="margin:0 0 14px 0;font-size:14px;line-height:1.8;color:${BRAND.text};">פלאש קורה בחתונה שלכם. <strong>My Night</strong> מתחיל לעבוד בבוקר אחרי. זיהוי הפנים עובר על כל צילום — של האורחים ושל הצלם — ומרכיב לכל אחד את האלבום שלו, אוטומטית. כל אורח מקבל רק את התמונות שהוא מופיע בהן. ואתם מקבלים את כל החתונה במקום אחד, בלי לחפש ובלי לתייג. זיכרון מושלם, אפס מאמץ.</p>
+        <p style="margin:0 0 14px 0;font-size:14px;line-height:1.8;color:${BRAND.text};">פלאש קורה בחתונה שלכם. <strong>My Night</strong> מתחיל לעבוד בבוקר אחרי, ומרכיב לכל אחד את האלבום שלו, בזיהוי חכם. כל אורח מקבל רק את התמונות שהוא מופיע בהן. ואתם מקבלים את כל החתונה במקום אחד, בלי לחפש ובלי לתייג. זיכרון מושלם, אפס מאמץ.</p>
         ${button(`${env.FRONTEND_URL}/here-i-am`, 'שדרוג ל-My Night')}
       </div>
       <p style="margin:24px 0 0 0;font-size:14px;color:${BRAND.muted};">יש שאלה? פשוט השיבו למייל הזה.</p>
