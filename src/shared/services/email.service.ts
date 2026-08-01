@@ -77,10 +77,9 @@ function renderLayout(opts: {
                 <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                   <tr>
                     <td align="center" valign="middle" style="padding:0;">
-                      <!-- Wordmark alone at its real aspect ratio; the old markup
-                           squashed it into a 44x44 box beside duplicate text. The
-                           alt text carries the brand when images are blocked. -->
-                      <img src="${BRAND.logoUrl}" alt="${BRAND.name}" width="170" style="display:block;border:0;outline:none;width:170px;max-width:170px;height:auto;" />
+                      <!-- Text wordmark, not an image: always crisp, never blocked
+                           or downscaled by the mail client, no proxy caching. -->
+                      <div style="font-family:Georgia,'Times New Roman',serif;font-style:italic;font-weight:700;font-size:36px;letter-spacing:0.5px;color:${BRAND.primary};line-height:1;">My Night</div>
                     </td>
                   </tr>
                 </table>
@@ -294,9 +293,20 @@ class EmailService {
         <p style="margin:0;font-size:13px;color:${BRAND.muted};">כל אורח מקבל 16 צילומים. בלי לראות, בלי לחזור אחורה — הכל מתפתח בבוקר שאחרי.</p>
       </div>
       ${button(link, 'לצפייה במצלמה')}
-      <div style="text-align:center;margin:26px 0 6px 0;">
-        <img src="${env.FRONTEND_URL}/api/events/code/${opts.eventCode}/qr.png" alt="QR" width="180" height="180" style="display:inline-block;border:1px solid ${BRAND.bg};border-radius:12px;background:#fff;padding:8px;" />
-        <p style="margin:10px 0 0 0;font-size:13px;color:${BRAND.muted};">הדפיסו והציבו על השולחנות — האורחים סורקים ומצלמים.</p>
+      <div style="background:#fff;border:1px solid ${BRAND.bg};border-radius:12px;padding:22px;margin:26px 0;text-align:center;">
+        <p style="margin:0 0 4px 0;font-size:16px;font-weight:700;color:${BRAND.primary};">קוד ה-QR לאורחים</p>
+        <p style="margin:0 0 14px 0;font-size:13px;color:${BRAND.muted};">הדפיסו והציבו — האורחים סורקים ומצלמים, בלי אפליקציה.</p>
+        <img src="${env.FRONTEND_URL}/api/events/code/${opts.eventCode}/qr.png?v=2" alt="קוד QR" width="190" height="190" style="display:inline-block;border:1px solid ${BRAND.bg};border-radius:12px;background:#fff;padding:8px;" />
+        <div style="margin:16px 0 0 0;">${button(`${env.FRONTEND_URL}/api/events/code/${opts.eventCode}/qr.png?download=1`, 'הורדת קוד ה-QR')}</div>
+        <div style="margin:18px auto 0 auto;text-align:right;max-width:430px;background:${BRAND.bg};border-radius:8px;padding:14px 18px;">
+          <p style="margin:0 0 6px 0;font-size:13px;font-weight:700;color:${BRAND.primary};">איפה להדפיס ולהציב</p>
+          <ul style="margin:0;padding-right:18px;padding-left:0;font-size:13px;line-height:1.9;color:${BRAND.text};">
+            <li>הדפיסו בגודל A5–A4 על נייר מט</li>
+            <li>על שולחן קבלת הפנים וליד ספר הברכות</li>
+            <li>מסגרת קטנה על כל שולחן אורחים</li>
+            <li>ליד הבר ובאזור רחבת הריקודים</li>
+          </ul>
+        </div>
       </div>
       <p style="margin:0 0 4px 0;font-size:14px;line-height:1.8;color:${BRAND.text};"><strong>איך רואים את התמונות?</strong></p>
       <p style="margin:0 0 20px 0;font-size:14px;line-height:1.8;color:${BRAND.muted};">בבוקר שאחרי החתונה, היכנסו ל-<a href="${env.FRONTEND_URL}/login" style="color:${BRAND.accentDark};">${env.FRONTEND_URL.replace(/^https?:\/\//, '')}/login</a> עם מספר הטלפון ${phoneLocal ? `<strong style="color:${BRAND.text};" dir="ltr">${phoneLocal}</strong>` : 'שאיתו נרשמתם'} — האלבום שלכם יחכה שם.</p>
