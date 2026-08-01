@@ -39,7 +39,7 @@
     "morgan": "^1.10.0",
     "multer": "^2.0.2",
     "nanoid": "^3.3.7",
-    "nodemailer": "^6.9.7",
+    "nodemailer": "^9.0.3",
     "qrcode": "^1.5.4",
     "stripe": "^14.9.0",
     "unzipper": "^0.12.3",
