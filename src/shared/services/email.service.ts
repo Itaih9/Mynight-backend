@@ -37,7 +37,8 @@ const BRAND = {
   // Served from our own domain, not a free image host. The previous postimg.cc
   // link had 404'd, which is why the logo stopped rendering — those links expire.
   // Must stay a PNG/JPG: email clients don't render SVG.
-  logoUrl: `${env.FRONTEND_URL}/logo-email.png`,
+  // ?v bump busts mail-client/Gmail-proxy image caches when the asset changes.
+  logoUrl: `${env.FRONTEND_URL}/logo-email.png?v=2`,
   name: 'MyNight',
   tagline: 'Photo Matching Made Easy',
   primary: '#1A1A1A',
