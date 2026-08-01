@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import QRCode from 'qrcode';
 import { eventsService } from './events.service';
 import { AuthRequest } from '@/shared/middleware/auth.middleware';
 import { env } from '@/shared/config/env';
@@ -36,6 +37,32 @@ export class EventsController {
         success: true,
         data: event,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Public QR of the guest camera link — the couple prints/displays it at the
+  // wedding and guests scan it. Generated on our own backend (no third-party QR
+  // service), cached, and downloadable via ?download=1.
+  async getEventQr(req: Request, res: Response, next: NextFunction) {
+    try {
+      const code = req.params.code.toUpperCase();
+      await eventsService.getEventByCode(code); // 404s if the code is unknown
+      const target = `${env.FRONTEND_URL}/camera/${code}`;
+      const png = await QRCode.toBuffer(target, {
+        type: 'png',
+        width: 720,
+        margin: 2,
+        errorCorrectionLevel: 'M',
+        color: { dark: '#1A1A1A', light: '#FFFFFF' },
+      });
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      if (req.query.download) {
+        res.setHeader('Content-Disposition', `attachment; filename="mynight-flash-${code}.png"`);
+      }
+      res.send(png);
     } catch (error) {
       next(error);
     }

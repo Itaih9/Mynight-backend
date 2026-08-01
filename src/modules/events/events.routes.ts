@@ -31,6 +31,8 @@ router.post('/flash/register', eventsController.registerFreeFlash);
 router.post('/', protect, validate(createEventSchema), eventsController.createEvent);
 router.get('/my-events', protect, eventsController.getUserEvents);
 router.get('/code/:code', eventsController.getEventByCode);
+// Public QR PNG of the guest camera link (?download=1 to force download).
+router.get('/code/:code/qr.png', eventsController.getEventQr);
 router.get('/slug/:slug', eventsController.getEventBySlug);
 router.get('/find/:identifier', eventsController.getEventByCodeOrSlug);
 router.get('/:id', protect, eventsController.getEvent);

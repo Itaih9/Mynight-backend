@@ -293,6 +293,10 @@ class EmailService {
         <p style="margin:0;font-size:13px;color:${BRAND.muted};">כל אורח מקבל 16 צילומים. בלי לראות, בלי לחזור אחורה — הכל מתפתח בבוקר שאחרי.</p>
       </div>
       ${button(link, 'לצפייה במצלמה')}
+      <div style="text-align:center;margin:26px 0 6px 0;">
+        <img src="${env.FRONTEND_URL}/api/events/code/${opts.eventCode}/qr.png" alt="QR" width="180" height="180" style="display:inline-block;border:1px solid ${BRAND.bg};border-radius:12px;background:#fff;padding:8px;" />
+        <p style="margin:10px 0 0 0;font-size:13px;color:${BRAND.muted};">הדפיסו והציבו על השולחנות — האורחים סורקים ומצלמים.</p>
+      </div>
       <p style="margin:0 0 4px 0;font-size:14px;line-height:1.8;color:${BRAND.text};"><strong>איך רואים את התמונות?</strong></p>
       <p style="margin:0 0 20px 0;font-size:14px;line-height:1.8;color:${BRAND.muted};">בבוקר שאחרי החתונה, היכנסו ל-<a href="${env.FRONTEND_URL}/login" style="color:${BRAND.accentDark};">${env.FRONTEND_URL.replace(/^https?:\/\//, '')}/login</a> עם מספר הטלפון ${phoneLocal ? `<strong style="color:${BRAND.text};" dir="ltr">${phoneLocal}</strong>` : 'שאיתו נרשמתם'} — האלבום שלכם יחכה שם.</p>
       <div style="background:#fff;border:1px solid ${BRAND.bg};border-radius:8px;padding:18px 22px;margin:28px 0 0 0;">
