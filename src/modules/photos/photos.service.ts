@@ -364,19 +364,24 @@ class PhotosService {
   }
 
 
-  async getEventStoryGroups(eventId: string): Promise<{ uploaderName: string; items: any[] }[]> {
+  async getEventStoryGroups(eventId: string): Promise<{ groupKey: string; uploaderName: string; items: any[] }[]> {
     // Deliberately no indexedFaces: the story viewer never renders face circles
     // (only the grid lightbox and the face overlay do), and on a big event the
     // face data is several MB — enough to stall the stories request long enough
     // that the gallery falls back to page 1 and shows a single ring.
     const photos = await Photo.find({ eventId })
-      .select('_id s3Key thumbnailUrl posterUrl category aiCategories uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height')
+      .select('_id s3Key thumbnailUrl posterUrl category aiCategories uploaderName uploadedBy deviceId createdAt metadata.mimeType metadata.width metadata.height')
       .sort({ createdAt: 1 })
       .lean();
 
-    const groups = new Map<string, any[]>();
+    // Group by a STABLE per-guest key, not the typed name: two different guests
+    // who both type "דני" must get SEPARATE stories. deviceId is the stable id
+    // (one per phone/browser). Photos without one (older or web uploads) fall
+    // back to the name — preserving today's behavior, so no data migration.
+    const groups = new Map<string, { uploaderName: string; items: any[] }>();
     for (const p of photos) {
       const name = p.uploaderName || (p.uploadedBy === 'guest' ? 'אורח' : 'צלם האירוע');
+      const key = p.deviceId ? `d:${p.deviceId}` : `n:${name}`;
       const item = {
         _id: p._id,
         url: `${env.CLOUDFRONT_URL}/${p.s3Key}`,
@@ -387,15 +392,16 @@ class PhotosService {
         aiCategories: (p as any).aiCategories ?? [],
         uploaderName: name,
         uploadedBy: p.uploadedBy,
+        groupKey: key,
         createdAt: p.createdAt,
         metadata: p.metadata,
       };
-      const arr = groups.get(name);
-      if (arr) arr.push(item);
-      else groups.set(name, [item]);
+      const g = groups.get(key);
+      if (g) g.items.push(item);
+      else groups.set(key, { uploaderName: name, items: [item] });
     }
 
-    return Array.from(groups.entries()).map(([uploaderName, items]) => ({ uploaderName, items }));
+    return Array.from(groups.entries()).map(([groupKey, g]) => ({ groupKey, uploaderName: g.uploaderName, items: g.items }));
   }
 
   async getEventPhotos(eventId: string, page: number = 1, limit: number = 20, seed?: string, category?: string): Promise<{ photos: IPhoto[]; total: number; hasMore: boolean }> {
