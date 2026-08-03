@@ -290,7 +290,7 @@ class EmailService {
       <div style="background:${BRAND.bg};border-right:3px solid ${BRAND.accent};border-radius:8px;padding:18px 22px;margin:24px 0;">
         <p style="margin:0 0 10px 0;font-size:14px;font-weight:700;color:${BRAND.primary};">הקישור לאורחים</p>
         <p style="margin:0 0 10px 0;font-size:14px;line-height:1.8;color:${BRAND.text};word-break:break-all;">${link}</p>
-        <p style="margin:0;font-size:13px;color:${BRAND.muted};">כל אורח מקבל 16 צילומים. בלי לראות, בלי לחזור אחורה — הכל מתפתח בבוקר שאחרי.</p>
+        <p style="margin:0;font-size:13px;color:${BRAND.muted};">כל אורח מקבל 8 צילומים. בלי לראות, בלי לחזור אחורה — הכל מתפתח בבוקר שאחרי.</p>
       </div>
       ${button(link, 'לצפייה במצלמה')}
       <div style="background:#fff;border:1px solid ${BRAND.bg};border-radius:12px;padding:22px;margin:26px 0;text-align:center;">

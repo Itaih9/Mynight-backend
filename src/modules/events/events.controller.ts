@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import QRCode from 'qrcode';
+import { planFor } from '@/shared/config/flashPlans';
 import { eventsService } from './events.service';
 import { AuthRequest } from '@/shared/middleware/auth.middleware';
 import { env } from '@/shared/config/env';
@@ -242,7 +243,7 @@ export class EventsController {
           eventCode: event.eventCode,
           cameraUrl: `${env.FRONTEND_URL}/camera/${event.eventCode}`,
           weddingDate: event.weddingDate,
-          shotLimit: event.disposableShotLimit ?? 16,
+          shotLimit: planFor(event.flashTier).shotLimit,
           isNew,
         },
       });
