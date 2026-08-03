@@ -5,6 +5,7 @@ import { rekognitionService } from '../rekognition/rekognition.service';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
 import { NotFoundError, ValidationError } from '@/shared/utils/errors';
+import { planFor } from '@/shared/config/flashPlans';
 import logger from '@/shared/utils/logger';
 import { nanoid } from 'nanoid';
 import archiver from 'archiver';
@@ -278,6 +279,11 @@ class PhotosService {
 
     if (event.packageName === 'האוספת') {
       throw new ValidationError('Face matching is not available for this package');
+    }
+
+    // Face recognition is a Flash Plus feature.
+    if (!planFor(event.flashTier).faceRecognition) {
+      throw new ValidationError('זיהוי הפנים זמין רק ב-Flash Plus');
     }
 
     // Upload selfie to S3 temporarily
@@ -677,7 +683,8 @@ class PhotosService {
 
   async getDisposableStatus(eventCodeOrSlug: string, deviceId?: string) {
     const event = await this.findEventForDisposable(eventCodeOrSlug);
-    const shotLimit = event.disposableShotLimit ?? 16;
+    const plan = planFor(event.flashTier);
+    const shotLimit = plan.shotLimit;
     const taken = deviceId ? await this.firedCount(event._id, deviceId) : 0;
     return {
       enabled: !!event.disposableEnabled,
@@ -686,6 +693,9 @@ class PhotosService {
       shotLimit,
       taken,
       remaining: Math.max(0, shotLimit - taken),
+      // Drives the camera UI: hide video mode on the free tier.
+      tier: event.flashTier === 'plus' ? 'plus' : 'basic',
+      videoEnabled: plan.video,
     };
   }
 
@@ -694,7 +704,12 @@ class PhotosService {
     if (!event.disposableEnabled) {
       throw new ValidationError('מצלמה חד-פעמית אינה פעילה לאירוע זה');
     }
-    const shotLimit = event.disposableShotLimit ?? 16;
+    const plan = planFor(event.flashTier);
+    // Video is a Flash Plus feature; the free tier is photos only.
+    if (!plan.video && fileType?.startsWith('video/')) {
+      throw new ValidationError('וידאו זמין רק ב-Flash Plus');
+    }
+    const shotLimit = plan.shotLimit;
     const taken = await this.firedCount(event._id, deviceId);
     if (taken >= shotLimit) {
       throw new ValidationError('אזל הפילם 🎞️');
@@ -718,7 +733,13 @@ class PhotosService {
     metadata?: { size: number; mimeType: string }
   ): Promise<{ remaining: number; photo: { _id: string; url: string; thumbnailUrl: string; type: string } }> {
     const event = await this.findEventForDisposable(eventCodeOrSlug);
-    const shotLimit = event.disposableShotLimit ?? 16;
+    const plan = planFor(event.flashTier);
+    // Guard the completion path too — a basic-tier client must not slip a video
+    // through even if it skipped the presign check.
+    if (!plan.video && metadata?.mimeType?.startsWith('video/')) {
+      throw new ValidationError('וידאו זמין רק ב-Flash Plus');
+    }
+    const shotLimit = plan.shotLimit;
 
     await this.setUploadStartedIfFirst(event);
 

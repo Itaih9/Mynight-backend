@@ -23,12 +23,13 @@ export class PaymentController {
 
   async createPayment(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { eventId, amount, couponCode } = req.body;
+      const { eventId, amount, couponCode, product } = req.body;
       const result = await paymentService.createSumitPayment(
         req.userId!,
         eventId,
         amount,
-        couponCode
+        couponCode,
+        product
       );
       res.status(201).json({
         success: true,

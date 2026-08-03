@@ -2,8 +2,10 @@ import { z } from 'zod';
 
 export const createPaymentIntentSchema = z.object({
   eventId: z.string(),
-  amount: z.number().positive(),
+  // Optional: for the Flash Plus (פלאש+) product the server sets the price.
+  amount: z.number().positive().optional(),
   couponCode: z.string().optional(),
+  product: z.string().optional(),
 });
 
 export const payWithCouponSchema = z.object({

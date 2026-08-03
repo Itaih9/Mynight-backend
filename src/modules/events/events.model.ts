@@ -45,6 +45,9 @@ export interface IEvent extends Document {
   // Lead-gen: free פלאש signups are the top of the funnel. Which emails a couple
   // has received now lives in EmailSendLog, not here.
   source?: 'flash_free' | 'paid' | 'admin';
+  // Flash plan tier. 'basic' = free (8 shots, no video, no face album); 'plus' =
+  // paid (24 shots, video, face recognition). Drives all per-tier gating.
+  flashTier?: 'basic' | 'plus';
   // True only for events created via the automation service token. That token
   // may delete an event ONLY when this is true — so it can clean up its own
   // test events but can never delete a real couple's gallery.
@@ -142,6 +145,11 @@ const eventSchema = new Schema<IEvent>(
       type: String,
       enum: ['flash_free', 'paid', 'admin'],
       default: 'paid',
+    },
+    flashTier: {
+      type: String,
+      enum: ['basic', 'plus'],
+      default: 'basic',
     },
     createdByService: {
       type: Boolean,

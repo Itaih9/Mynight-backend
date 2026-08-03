@@ -8,6 +8,7 @@ import { Coupon } from '../coupon/coupon.model';
 import { couponService } from '../coupon/coupon.service';
 import { affiliateService } from '../affiliate/affiliate.service';
 import { env } from '@/shared/config/env';
+import { FLASH_PLUS_PRICE_ILS } from '@/shared/config/flashPlans';
 import { NotFoundError, ValidationError, AppError } from '@/shared/utils/errors';
 import logger from '@/shared/utils/logger';
 
@@ -130,6 +131,7 @@ class PaymentService {
       await Event.findByIdAndUpdate(eventId, {
         isPaid: true,
         paymentId: payment._id,
+        flashTier: 'plus',
       });
 
       await this.processAffiliateCommission(payment);
@@ -155,7 +157,8 @@ class PaymentService {
     userId: string,
     eventId: string,
     amount: number,
-    couponCode?: string
+    couponCode?: string,
+    product?: string
   ): Promise<SumitChargeResult> {
     const event = await Event.findById(eventId);
     if (!event) {
@@ -166,8 +169,19 @@ class PaymentService {
       throw new ValidationError('Unauthorized to pay for this event');
     }
 
-    if (event.isPaid) {
+    // Flash Plus (פלאש+) upgrade: price is server-authoritative (never trust the
+    // client amount), and it's allowed on an unpaid free-flash event.
+    if (product === 'flash_plus') {
+      if (event.flashTier === 'plus') {
+        throw new ValidationError('האירוע כבר משודרג ל-פלאש+');
+      }
+      amount = FLASH_PLUS_PRICE_ILS;
+    } else if (event.isPaid) {
       throw new ValidationError('Event is already paid');
+    }
+
+    if (!amount || amount <= 0) {
+      throw new ValidationError('סכום התשלום חסר');
     }
 
     let finalAmount = amount;
@@ -213,10 +227,11 @@ class PaymentService {
       metadata: {
         couponCode,
         discountPercent,
+        product,
       },
     });
 
-    logger.info(`Sumit payment initiated: ${payment._id} for event ${eventId}, amount: ${finalAmount} ILS`);
+    logger.info(`Sumit payment initiated: ${payment._id} for event ${eventId}, amount: ${finalAmount} ILS${product ? ` (${product})` : ''}`);
 
     const pk = env.SUMIT_PUBLIC_KEY || '';
     const sk = env.SUMIT_API_KEY || '';
@@ -256,6 +271,10 @@ class PaymentService {
       const customerName = user
         ? [user.partnerName1, user.partnerName2].filter(Boolean).join(' & ') || user.name || user.phoneNumber
         : userId;
+      // Line-item name shown on the Sumit invoice/document. (The MERCHANT name —
+      // "איתי הופמן" — is the Sumit account business name, set in the Sumit
+      // dashboard, not here.)
+      const itemName = payment.metadata?.product === 'flash_plus' ? 'פלאש+' : 'My Night';
 
       const response = await axios.post(SUMIT_CHARGE_URL, {
         Credentials: {
@@ -273,8 +292,8 @@ class PaymentService {
         Items: [
           {
             Item: {
-              Name: 'MyNight Wedding Album',
-              Description: 'MyNight Wedding Album',
+              Name: itemName,
+              Description: itemName,
               Price: payment.amount,
               Currency: 'ILS',
               SearchMode: 'Name',
@@ -282,7 +301,7 @@ class PaymentService {
             Quantity: 1,
             UnitPrice: payment.amount,
             Currency: 'ILS',
-            Description: 'MyNight Wedding Album',
+            Description: itemName,
           },
         ],
         SendDocumentByEmail: !!user?.email,
@@ -304,6 +323,7 @@ class PaymentService {
         await Event.findByIdAndUpdate(payment.eventId, {
           isPaid: true,
           paymentId: payment._id,
+          flashTier: 'plus',
         });
 
         if (payment.metadata?.couponCode) {
@@ -424,6 +444,7 @@ class PaymentService {
         await Event.findByIdAndUpdate(payment.eventId, {
           isPaid: true,
           paymentId: payment._id,
+          flashTier: 'plus',
         });
 
         if (payment.metadata?.couponCode) {

@@ -5,8 +5,16 @@ import { Event } from '../events/events.model';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
 import { NotFoundError, ValidationError } from '@/shared/utils/errors';
+import { planFor } from '@/shared/config/flashPlans';
 import logger from '@/shared/utils/logger';
 import archiver from 'archiver';
+
+// Face recognition is a Flash Plus feature; every face endpoint gates on it.
+const requirePlus = (event: { flashTier?: string }) => {
+  if (!planFor(event.flashTier).faceRecognition) {
+    throw new ValidationError('זיהוי הפנים זמין רק ב-Flash Plus');
+  }
+};
 import { Response } from 'express';
 
 interface UniqueFace {
@@ -27,6 +35,7 @@ class FacesService {
     if (event.userId.toString() !== userId) {
       throw new ValidationError('Unauthorized to view faces for this event');
     }
+    requirePlus(event);
 
     // Get all photos with faces for this event
     const photos = await Photo.find({
@@ -81,6 +90,7 @@ class FacesService {
     if (userId && event.userId.toString() !== userId) {
       throw new ValidationError('Unauthorized to view photos for this event');
     }
+    requirePlus(event);
 
     // A Rekognition FaceId is unique per detected face, so the tapped face id
     // only ever appears on the single photo it came from. To return ALL photos
@@ -122,6 +132,7 @@ class FacesService {
     if (!event) {
       throw new NotFoundError('Event');
     }
+    requirePlus(event);
 
     const photos = await Photo.find({
       eventId,
