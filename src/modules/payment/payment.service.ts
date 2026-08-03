@@ -373,6 +373,11 @@ class PaymentService {
     const returnUrl = `${frontendBase}/payment-callback?paymentId=${payment._id}`;
 
     try {
+      // Title shown on the Sumit hosted page. Without it Sumit falls back to the
+      // account business name ("איתי הופמן"). (The account name itself is a Sumit
+      // dashboard setting — this only overrides the per-payment description.)
+      const pageTitle = payment.metadata?.product === 'flash_plus' ? 'פלאש+' : 'My Night';
+
       const response = await axios.post(SUMIT_BEGIN_REDIRECT_URL, {
         Credentials: {
           CompanyID: Number(env.SUMIT_COMPANY_ID),
@@ -383,6 +388,8 @@ class PaymentService {
         Currency: 'ILS',
         Identifier: uniqueIdentifier,
         RedirectURL: returnUrl,
+        Description: pageTitle,
+        DocumentDescription: pageTitle,
       });
 
       const redirectUrl: string | undefined = response.data?.Data?.RedirectURL || response.data?.RedirectURL;
