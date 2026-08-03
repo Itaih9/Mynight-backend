@@ -383,7 +383,7 @@ class PaymentService {
           : 'לקוח';
         const bill = await axios.post('https://api.sumit.co.il/billing/payments/beginredirect/', {
           Credentials: { CompanyID: Number(env.SUMIT_COMPANY_ID), APIKey: env.SUMIT_API_KEY },
-          Customer: { Name: customerName, SearchMode: 'Name', ExternalIdentifier: userId },
+          Customer: { Name: customerName, SearchMode: 'Name' },
           Items: [{
             Item: { Name: 'פלאש+', Description: 'פלאש+', Price: payment.amount, Currency: 'ILS', SearchMode: 'Name' },
             Quantity: 1, UnitPrice: payment.amount, Currency: 'ILS',
