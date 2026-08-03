@@ -373,10 +373,38 @@ class PaymentService {
     const returnUrl = `${frontendBase}/payment-callback?paymentId=${payment._id}`;
 
     try {
-      // Title shown on the Sumit hosted payment page. Per Sumit support, the
-      // `Header` field sets it; without it the page falls back to the account
-      // business name ("איתי הופמן").
-      const pageTitle = payment.metadata?.product === 'flash_plus' ? 'פלאש+' : 'My Night';
+      // Flash Plus (פלאש+): Sumit's Payments API redirect honors the `Header`
+      // field for the page title. Gated to flash_plus — the package checkout
+      // keeps the CreditGuy flow below (its verify path is unchanged).
+      if (payment.metadata?.product === 'flash_plus') {
+        const user = await User.findById(userId);
+        const customerName = user
+          ? [user.partnerName1, user.partnerName2].filter(Boolean).join(' & ') || user.name || user.phoneNumber
+          : 'לקוח';
+        const bill = await axios.post('https://api.sumit.co.il/billing/payments/beginredirect/', {
+          Credentials: { CompanyID: Number(env.SUMIT_COMPANY_ID), APIKey: env.SUMIT_API_KEY },
+          Customer: { Name: customerName, SearchMode: 'Name', ExternalIdentifier: userId },
+          Items: [{
+            Item: { Name: 'פלאש+', Description: 'פלאש+', Price: payment.amount, Currency: 'ILS', SearchMode: 'Name' },
+            Quantity: 1, UnitPrice: payment.amount, Currency: 'ILS',
+          }],
+          RedirectURL: returnUrl,
+          Header: 'פלאש+',
+        });
+        const url: string | undefined = bill.data?.Data?.RedirectURL || bill.data?.RedirectURL;
+        if (!url) {
+          const err = bill.data?.UserErrorMessage || bill.data?.TechnicalErrorDetails || 'Failed to begin Sumit redirect';
+          throw new AppError(typeof err === 'string' ? err : 'Failed to begin Sumit redirect', 400);
+        }
+        payment.metadata = { ...(payment.metadata || {}), sumitIdentifier: uniqueIdentifier, sumitFlow: 'billing' };
+        payment.markModified('metadata');
+        await payment.save();
+        logger.info(`Sumit billing redirect (flash_plus) for payment ${payment._id}`);
+        return { redirectUrl: url };
+      }
+
+      // Package checkout — CreditGuy flow (Header is ignored here).
+      const pageTitle = 'My Night';
 
       const response = await axios.post(SUMIT_BEGIN_REDIRECT_URL, {
         Credentials: {

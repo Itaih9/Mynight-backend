@@ -22,8 +22,9 @@ export const FLASH_PLANS: Record<FlashTier, FlashPlan> = {
 
 /**
  * One-time price (in ILS / ₪) to upgrade an event to Flash Plus.
+ * ⚠️ TEMPORARILY 1 for the live payment-page test — restore to 50 after.
  */
-export const FLASH_PLUS_PRICE_ILS = 50;
+export const FLASH_PLUS_PRICE_ILS = 1;
 
 export const FLASH_PLUS_PACKAGE_NAME = 'פלאש+';
 
