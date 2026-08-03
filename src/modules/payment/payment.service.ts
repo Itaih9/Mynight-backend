@@ -381,7 +381,7 @@ class PaymentService {
         const customerName = user
           ? [user.partnerName1, user.partnerName2].filter(Boolean).join(' & ') || user.name || user.phoneNumber
           : 'לקוח';
-        const bill = await axios.post('https://api.sumit.co.il/billing/payments/beginredirect/', {
+        const billBody = {
           Credentials: { CompanyID: Number(env.SUMIT_COMPANY_ID), APIKey: env.SUMIT_API_KEY },
           Customer: { Name: customerName, SearchMode: 'Name' },
           Items: [{
@@ -390,7 +390,9 @@ class PaymentService {
           }],
           RedirectURL: returnUrl,
           Header: 'פלאש+',
-        });
+        };
+        logger.info(`FLASHPLUS-REQ amount=${payment.amount} name="${customerName}" body=${JSON.stringify({ ...billBody, Credentials: 'REDACTED' })}`);
+        const bill = await axios.post('https://api.sumit.co.il/billing/payments/beginredirect/', billBody);
         const url: string | undefined = bill.data?.Data?.RedirectURL || bill.data?.RedirectURL;
         if (!url) {
           const err = bill.data?.UserErrorMessage || bill.data?.TechnicalErrorDetails || 'Failed to begin Sumit redirect';
