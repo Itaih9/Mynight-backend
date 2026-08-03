@@ -4,12 +4,17 @@ import { env } from '@/shared/config/env';
 import logger from '@/shared/utils/logger';
 import { AppError } from '@/shared/utils/errors';
 import { buildIcs, googleCalendarUrl, type CalendarEvent } from '@/shared/utils/calendar';
-import { ensureEventQrUrl } from './qr.service';
+import { generateEventQrBuffer } from './qr.service';
 
 interface EmailAttachment {
   filename: string;
-  content: string;
+  /** Text attachments (e.g. .ics): raw utf-8 string, base64'd on send. */
+  content?: string;
+  /** Binary attachments (e.g. PNG): already base64 — used as-is. */
+  contentBase64?: string;
   type: string;
+  /** Set → embedded inline image (referenced in HTML as cid:<contentId>). */
+  contentId?: string;
 }
 
 interface SendEmailParams {
@@ -133,9 +138,10 @@ class EmailService {
             ? {
                 attachments: attachments.map((a) => ({
                   filename: a.filename,
-                  content: Buffer.from(a.content, 'utf-8').toString('base64'),
+                  content: a.contentBase64 ?? Buffer.from(a.content ?? '', 'utf-8').toString('base64'),
                   type: a.type,
-                  disposition: 'attachment',
+                  disposition: a.contentId ? ('inline' as const) : ('attachment' as const),
+                  ...(a.contentId ? { content_id: a.contentId } : {}),
                 })),
               }
             : {}),
@@ -283,8 +289,9 @@ class EmailService {
   }): Promise<void> {
     const link = `${env.FRONTEND_URL}/camera/${opts.eventCode}`;
     const dateLabel = new Date(opts.weddingDate).toLocaleDateString('he-IL');
-    // Static CloudFront-hosted QR (reliable in mail-client image proxies).
-    const qrUrl = await ensureEventQrUrl(opts.eventCode);
+    // Embed the QR inline (CID) so no mail client has to fetch it remotely —
+    // works in Gmail, Spark, Apple Mail, Outlook alike.
+    const qrPng = await generateEventQrBuffer(opts.eventCode);
     // Show the number in familiar local form (+972501234567 -> 0501234567).
     const phoneLocal = opts.phoneNumber ? opts.phoneNumber.replace(/^\+972/, '0') : '';
     const body = `
@@ -299,7 +306,7 @@ class EmailService {
       <div style="background:#fff;border:1px solid ${BRAND.bg};border-radius:12px;padding:22px;margin:26px 0;text-align:center;">
         <p style="margin:0 0 4px 0;font-size:16px;font-weight:700;color:${BRAND.primary};">קוד ה-QR לאורחים</p>
         <p style="margin:0 0 14px 0;font-size:13px;color:${BRAND.muted};">הדפיסו והציבו — האורחים סורקים ומצלמים, בלי אפליקציה.</p>
-        <img src="${qrUrl}" alt="קוד QR" width="190" height="190" style="display:inline-block;border:1px solid ${BRAND.bg};border-radius:12px;background:#fff;padding:8px;" />
+        <img src="cid:eventqr" alt="קוד QR" width="190" height="190" style="display:inline-block;border:1px solid ${BRAND.bg};border-radius:12px;background:#fff;padding:8px;" />
         <div style="margin:16px 0 0 0;">${button(`${env.FRONTEND_URL}/api/events/code/${opts.eventCode}/qr.png?download=1`, 'הורדת קוד ה-QR')}</div>
         <div style="margin:18px auto 0 auto;text-align:right;max-width:430px;background:${BRAND.bg};border-radius:8px;padding:14px 18px;">
           <p style="margin:0 0 6px 0;font-size:13px;font-weight:700;color:${BRAND.primary};">איפה להדפיס ולהציב</p>
@@ -324,6 +331,9 @@ class EmailService {
       to: opts.to,
       subject: `הפלאש שלכם מוכן — ${opts.coupleName} 📸`,
       htmlBody: renderLayout({ preheader: `הקישור למצלמה של האורחים מוכן.`, body, dir: 'rtl' }),
+      attachments: [
+        { filename: 'qr.png', contentBase64: qrPng.toString('base64'), type: 'image/png', contentId: 'eventqr' },
+      ],
     });
   }
 

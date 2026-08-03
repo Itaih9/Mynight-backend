@@ -12,18 +12,24 @@ import logger from '@/shared/utils/logger';
  */
 const qrKey = (eventCode: string) => `static/qr/${eventCode.toUpperCase()}.png`;
 
+/** Raw QR PNG of the camera link — used to embed the QR inline in emails (CID),
+ *  so no mail client has to fetch a remote image (Gmail proxies, Spark, etc.). */
+export async function generateEventQrBuffer(eventCode: string): Promise<Buffer> {
+  const target = `${env.FRONTEND_URL}/camera/${eventCode}`;
+  return QRCode.toBuffer(target, {
+    type: 'png',
+    width: 720,
+    margin: 2,
+    errorCorrectionLevel: 'M',
+    color: { dark: '#1A1A1A', light: '#FFFFFF' },
+  });
+}
+
 export async function ensureEventQrUrl(eventCode: string): Promise<string> {
   const key = qrKey(eventCode);
   const url = `${env.CLOUDFRONT_URL}/${key}`;
   try {
-    const target = `${env.FRONTEND_URL}/camera/${eventCode}`;
-    const png = await QRCode.toBuffer(target, {
-      type: 'png',
-      width: 720,
-      margin: 2,
-      errorCorrectionLevel: 'M',
-      color: { dark: '#1A1A1A', light: '#FFFFFF' },
-    });
+    const png = await generateEventQrBuffer(eventCode);
     await s3
       .putObject({
         Bucket: env.S3_BUCKET_NAME,
