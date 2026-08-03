@@ -4,6 +4,7 @@ import { env } from '@/shared/config/env';
 import logger from '@/shared/utils/logger';
 import { AppError } from '@/shared/utils/errors';
 import { buildIcs, googleCalendarUrl, type CalendarEvent } from '@/shared/utils/calendar';
+import { ensureEventQrUrl } from './qr.service';
 
 interface EmailAttachment {
   filename: string;
@@ -282,6 +283,8 @@ class EmailService {
   }): Promise<void> {
     const link = `${env.FRONTEND_URL}/camera/${opts.eventCode}`;
     const dateLabel = new Date(opts.weddingDate).toLocaleDateString('he-IL');
+    // Static CloudFront-hosted QR (reliable in mail-client image proxies).
+    const qrUrl = await ensureEventQrUrl(opts.eventCode);
     // Show the number in familiar local form (+972501234567 -> 0501234567).
     const phoneLocal = opts.phoneNumber ? opts.phoneNumber.replace(/^\+972/, '0') : '';
     const body = `
@@ -296,7 +299,7 @@ class EmailService {
       <div style="background:#fff;border:1px solid ${BRAND.bg};border-radius:12px;padding:22px;margin:26px 0;text-align:center;">
         <p style="margin:0 0 4px 0;font-size:16px;font-weight:700;color:${BRAND.primary};">קוד ה-QR לאורחים</p>
         <p style="margin:0 0 14px 0;font-size:13px;color:${BRAND.muted};">הדפיסו והציבו — האורחים סורקים ומצלמים, בלי אפליקציה.</p>
-        <img src="${env.FRONTEND_URL}/api/events/code/${opts.eventCode}/qr.png?v=2" alt="קוד QR" width="190" height="190" style="display:inline-block;border:1px solid ${BRAND.bg};border-radius:12px;background:#fff;padding:8px;" />
+        <img src="${qrUrl}" alt="קוד QR" width="190" height="190" style="display:inline-block;border:1px solid ${BRAND.bg};border-radius:12px;background:#fff;padding:8px;" />
         <div style="margin:16px 0 0 0;">${button(`${env.FRONTEND_URL}/api/events/code/${opts.eventCode}/qr.png?download=1`, 'הורדת קוד ה-QR')}</div>
         <div style="margin:18px auto 0 auto;text-align:right;max-width:430px;background:${BRAND.bg};border-radius:8px;padding:14px 18px;">
           <p style="margin:0 0 6px 0;font-size:13px;font-weight:700;color:${BRAND.primary};">איפה להדפיס ולהציב</p>
