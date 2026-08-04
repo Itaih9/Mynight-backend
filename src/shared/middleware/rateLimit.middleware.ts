@@ -26,6 +26,36 @@ export const loginBruteForceLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+/**
+ * Free פלאש signup is public and unauthenticated, so it needs the same kind of
+ * abuse ceiling the OTP flow has — otherwise one script can mint unlimited
+ * events (and welcome emails). Mirrors the client-side limits on the My Night
+ * registration: a handful per hour from one address, a bounded number per day.
+ */
+export const flashSignupLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: {
+    success: false,
+    error: 'נרשמתם כמה פעמים בזמן קצר. נסו שוב בעוד שעה.',
+    statusCode: 429,
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const flashSignupDailyLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000,
+  max: 10,
+  message: {
+    success: false,
+    error: 'עברתם את המכסה היומית להרשמות מכתובת זו. נסו שוב מחר.',
+    statusCode: 429,
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 const otpPhoneTracker = new Map<string, number[]>();
 const otpIpHourTracker = new Map<string, number[]>();
 const otpIpDayTracker = new Map<string, number[]>();

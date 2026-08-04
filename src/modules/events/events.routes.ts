@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { eventsController } from './events.controller';
 import { validate } from '@/shared/middleware/validation.middleware';
 import { protect } from '@/shared/middleware/auth.middleware';
+import { flashSignupLimiter, flashSignupDailyLimiter } from '@/shared/middleware/rateLimit.middleware';
 import { createEventSchema, updateSharingPermissionsSchema, updateSlugSchema } from './events.validation';
 import multer from 'multer';
 
@@ -26,7 +27,13 @@ const upload = multer({
 const router = Router();
 
 // Public: free פלאש signup — no auth, no payment (top of the lead funnel).
-router.post('/flash/register', eventsController.registerFreeFlash);
+// Rate-limited because it's unauthenticated and creates records + sends email.
+router.post(
+  '/flash/register',
+  flashSignupDailyLimiter,
+  flashSignupLimiter,
+  eventsController.registerFreeFlash
+);
 
 router.post('/', protect, validate(createEventSchema), eventsController.createEvent);
 router.get('/my-events', protect, eventsController.getUserEvents);
