@@ -47,15 +47,19 @@ const BRAND = {
   logoUrl: `${env.FRONTEND_URL}/logo-email.png?v=2`,
   name: 'MyNight',
   tagline: 'Photo Matching Made Easy',
-  primary: '#1A1A1A',
-  accent: '#D4A24C',
-  accentDark: '#A67C2E',
-  bg: '#F5F1EA',
-  cardBg: '#FFFFFF',
-  text: '#1A1A1A',
-  muted: '#6B6B6B',
-  border: '#E8E2D6',
+  // Stationery palette — matches the site (paper + charcoal ink + brand gold).
+  // Bright gold is for fills/rules only; gold TEXT uses accentDark so it stays
+  // legible on white (WCAG AA).
+  primary: '#1C1917',   // charcoal ink — headings, body
+  accent: '#F5C518',    // brand gold — button fills, ornaments
+  accentDark: '#7A5B0E', // darkened gold — legible gold-coloured text
+  bg: '#F4F1EC',        // warm paper backdrop
+  cardBg: '#FFFFFF',    // card stock
+  text: '#1C1917',
+  muted: '#57534E',
+  border: '#E6D5A8',    // gold hairline (solid hex — Outlook-safe)
   success: '#2E7D5B',
+  serif: "Georgia,'Times New Roman',serif", // elegant heading face, email-safe
 };
 
 function renderLayout(opts: {
@@ -85,14 +89,16 @@ function renderLayout(opts: {
                     <td align="center" valign="middle" style="padding:0;">
                       <!-- Text wordmark, not an image: always crisp, never blocked
                            or downscaled by the mail client, no proxy caching. -->
-                      <div style="font-family:Georgia,'Times New Roman',serif;font-style:italic;font-weight:700;font-size:36px;letter-spacing:0.5px;color:${BRAND.primary};line-height:1;">My Night</div>
+                      <div style="font-family:${BRAND.serif};font-style:italic;font-weight:700;font-size:36px;letter-spacing:0.5px;color:${BRAND.primary};line-height:1;">My Night</div>
+                      <!-- gold hairline under the wordmark, like the printed stationery -->
+                      <div style="margin:12px auto 0;width:132px;height:1px;background:${BRAND.accent};line-height:1px;font-size:0;">&nbsp;</div>
                     </td>
                   </tr>
                 </table>
               </td>
             </tr>
             <tr>
-              <td style="background:${BRAND.cardBg};border:1px solid ${BRAND.border};border-radius:16px;padding:40px 36px;box-shadow:0 4px 20px rgba(0,0,0,0.04);">
+              <td style="background:${BRAND.cardBg};border:1px solid ${BRAND.border};border-radius:16px;padding:40px 36px;box-shadow:0 10px 30px rgba(92,78,56,0.07);">
                 ${opts.body}
               </td>
             </tr>
@@ -111,12 +117,24 @@ function renderLayout(opts: {
 </html>`;
 }
 
+/** Primary action — gold fill with charcoal text, matching the site's button. */
 function button(href: string, label: string): string {
   return `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:24px auto;">
     <tr>
-      <td align="center" style="background:${BRAND.primary};border-radius:10px;">
-        <a href="${href}" target="_blank" style="display:inline-block;padding:14px 28px;color:#FFFFFF;text-decoration:none;font-size:15px;font-weight:600;letter-spacing:0.3px;">${label}</a>
+      <td align="center" style="background:${BRAND.accent};border-radius:12px;">
+        <a href="${href}" target="_blank" style="display:inline-block;padding:15px 30px;color:${BRAND.primary};text-decoration:none;font-size:15px;font-weight:700;letter-spacing:0.3px;">${label}</a>
       </td>
+    </tr>
+  </table>`;
+}
+
+/** Gold hairline with a small centred diamond — the stationery section divider. */
+function rule(): string {
+  return `<table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:28px auto;">
+    <tr>
+      <td style="width:70px;height:1px;background:${BRAND.border};line-height:1px;font-size:0;">&nbsp;</td>
+      <td style="padding:0 12px;color:${BRAND.accentDark};font-size:11px;line-height:1;">&#9670;</td>
+      <td style="width:70px;height:1px;background:${BRAND.border};line-height:1px;font-size:0;">&nbsp;</td>
     </tr>
   </table>`;
 }
@@ -295,18 +313,20 @@ class EmailService {
     // Show the number in familiar local form (+972501234567 -> 0501234567).
     const phoneLocal = opts.phoneNumber ? opts.phoneNumber.replace(/^\+972/, '0') : '';
     const body = `
-      <h1 style="margin:0 0 12px 0;font-size:24px;font-weight:700;color:${BRAND.primary};">הפלאש שלכם מוכן 📸</h1>
-      <p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:${BRAND.text};">${opts.coupleName}, מזל טוב! הכנו לכם מצלמה חד-פעמית לאורחים לחתונה ב-${dateLabel}.</p>
+      <p style="margin:0 0 10px 0;font-size:11px;font-weight:700;letter-spacing:3px;color:${BRAND.accentDark};text-align:center;">הפלאש שלכם</p>
+      <h1 style="margin:0 0 14px 0;font-family:${BRAND.serif};font-size:32px;font-weight:400;line-height:1.2;color:${BRAND.primary};text-align:center;">הפלאש שלכם מוכן</h1>
+      <p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:${BRAND.text};text-align:center;">${opts.coupleName}, מזל טוב! הכנו לכם מצלמה חד-פעמית לאורחים לחתונה ב-${dateLabel}.</p>
+      ${rule()}
       <div style="background:${BRAND.bg};border-right:3px solid ${BRAND.accent};border-radius:8px;padding:18px 22px;margin:24px 0;">
         <p style="margin:0 0 10px 0;font-size:14px;font-weight:700;color:${BRAND.primary};">הקישור לאורחים</p>
         <p style="margin:0 0 10px 0;font-size:14px;line-height:1.8;color:${BRAND.text};word-break:break-all;">${link}</p>
         <p style="margin:0;font-size:13px;color:${BRAND.muted};">כל אורח מקבל 8 צילומים. בלי לראות, בלי לחזור אחורה — הכל מתפתח בבוקר שאחרי.</p>
       </div>
       ${button(link, 'לצפייה במצלמה')}
-      <div style="background:#fff;border:1px solid ${BRAND.bg};border-radius:12px;padding:22px;margin:26px 0;text-align:center;">
-        <p style="margin:0 0 4px 0;font-size:16px;font-weight:700;color:${BRAND.primary};">קוד ה-QR לאורחים</p>
+      <div style="background:#fff;border:1px solid ${BRAND.border};border-radius:12px;padding:22px;margin:26px 0;text-align:center;">
+        <p style="margin:0 0 4px 0;font-family:${BRAND.serif};font-size:21px;font-weight:400;color:${BRAND.primary};">קוד ה-QR לאורחים</p>
         <p style="margin:0 0 14px 0;font-size:13px;color:${BRAND.muted};">הדפיסו והציבו — האורחים סורקים ומצלמים, בלי אפליקציה.</p>
-        <img src="cid:eventqr" alt="קוד QR" width="190" height="190" style="display:inline-block;border:1px solid ${BRAND.bg};border-radius:12px;background:#fff;padding:8px;" />
+        <img src="cid:eventqr" alt="קוד QR" width="190" height="190" style="display:inline-block;border:1px solid ${BRAND.border};border-radius:12px;background:#fff;padding:8px;" />
         <div style="margin:16px 0 0 0;">${button(`${env.FRONTEND_URL}/api/events/code/${opts.eventCode}/qr.png?download=1`, 'הורדת קוד ה-QR')}</div>
         <div style="margin:18px auto 0 auto;text-align:right;max-width:430px;background:${BRAND.bg};border-radius:8px;padding:14px 18px;">
           <p style="margin:0 0 6px 0;font-size:13px;font-weight:700;color:${BRAND.primary};">איפה להדפיס ולהציב</p>
@@ -320,9 +340,11 @@ class EmailService {
       </div>
       <p style="margin:0 0 4px 0;font-size:14px;line-height:1.8;color:${BRAND.text};"><strong>איך רואים את התמונות?</strong></p>
       <p style="margin:0 0 20px 0;font-size:14px;line-height:1.8;color:${BRAND.muted};">בבוקר שאחרי החתונה, היכנסו ל-<a href="${env.FRONTEND_URL}/login" style="color:${BRAND.accentDark};">${env.FRONTEND_URL.replace(/^https?:\/\//, '')}/login</a> עם מספר הטלפון ${phoneLocal ? `<strong style="color:${BRAND.text};" dir="ltr">${phoneLocal}</strong>` : 'שאיתו נרשמתם'} — האלבום שלכם יחכה שם.</p>
-      <div style="background:#fff;border:1px solid ${BRAND.bg};border-radius:8px;padding:18px 22px;margin:28px 0 0 0;">
-        <p style="margin:0 0 8px 0;font-size:15px;font-weight:700;color:${BRAND.primary};">רוצים שכל אורח יקבל את התמונות שלו?</p>
-        <p style="margin:0 0 14px 0;font-size:14px;line-height:1.8;color:${BRAND.text};">פלאש קורה בחתונה שלכם. <strong>My Night</strong> מתחיל לעבוד בבוקר אחרי, ומרכיב לכל אחד את האלבום שלו, בזיהוי חכם. כל אורח מקבל רק את התמונות שהוא מופיע בהן. ואתם מקבלים את כל החתונה במקום אחד, בלי לחפש ובלי לתייג. זיכרון מושלם, אפס מאמץ.</p>
+      ${rule()}
+      <div style="background:#FFF7F7;border:1px solid ${BRAND.border};border-radius:12px;padding:22px 24px;margin:8px 0 0 0;text-align:center;">
+        <p style="margin:0 0 8px 0;font-size:11px;font-weight:700;letter-spacing:2px;color:${BRAND.accentDark};">החבילה החכמה של My Night</p>
+        <p style="margin:0 0 10px 0;font-family:${BRAND.serif};font-size:22px;font-weight:400;line-height:1.25;color:${BRAND.primary};">רוצים שכל אורח יקבל את התמונות שלו?</p>
+        <p style="margin:0 0 14px 0;font-size:14px;line-height:1.8;color:${BRAND.text};text-align:right;">פלאש קורה בחתונה שלכם. <strong>My Night</strong> מתחיל לעבוד בבוקר אחרי, ומרכיב לכל אחד את האלבום שלו, בזיהוי חכם. כל אורח מקבל רק את התמונות שהוא מופיע בהן. ואתם מקבלים את כל החתונה במקום אחד, בלי לחפש ובלי לתייג. זיכרון מושלם, אפס מאמץ.</p>
         ${button(`${env.FRONTEND_URL}/here-i-am`, 'שדרוג ל-My Night')}
       </div>
       <p style="margin:24px 0 0 0;font-size:14px;color:${BRAND.muted};">יש שאלה? פשוט השיבו למייל הזה.</p>
