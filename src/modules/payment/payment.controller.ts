@@ -1,4 +1,4 @@
-import { Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { paymentService } from './payment.service';
 import { AuthRequest } from '@/shared/middleware/auth.middleware';
 
@@ -76,6 +76,27 @@ export class PaymentController {
         data: result.payment,
         message: result.message,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Public — code-in-link Flash+ upgrade (couple not logged in)
+  async beginFlashPlus(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { code } = req.body;
+      const result = await paymentService.beginFlashPlusByCode(code);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async verifyFlashPlus(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { paymentId } = req.body;
+      const result = await paymentService.verifyFlashPlusByPayment(paymentId);
+      res.json({ success: result.success, data: result, message: result.message });
     } catch (error) {
       next(error);
     }

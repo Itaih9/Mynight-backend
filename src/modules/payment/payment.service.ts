@@ -370,7 +370,10 @@ class PaymentService {
 
     const uniqueIdentifier = `${payment._id}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const frontendBase = (env.FRONTEND_URL || '').replace(/\/+$/, '');
-    const returnUrl = `${frontendBase}/payment-callback?paymentId=${payment._id}`;
+    // Flash+ (code-in-link) upgrades return to the flash-plus thank-you; album
+    // payments keep the shared /payment-callback.
+    const returnPath = payment.metadata?.product === 'flash_plus' ? '/flash/thanks' : '/payment-callback';
+    const returnUrl = `${frontendBase}${returnPath}?paymentId=${payment._id}`;
 
     try {
       // NOTE: Sumit's billing/payments/beginredirect honors a `Header` (page
@@ -475,6 +478,50 @@ class PaymentService {
       logger.error(`Sumit gettransaction failed: ${error.message}`);
       throw new AppError(`Failed to verify payment: ${error.message}`, 500);
     }
+  }
+
+  // ── Public Flash+ upgrade (code-in-link, no auth) ──────────────────────────
+  // The couple isn't logged in; identity is derived from their event code (from
+  // the QR/email link) and, on return, the random paymentId. Price is always
+  // server-authoritative (FLASH_PLUS_PRICE_ILS). The authed album flow is untouched.
+  async beginFlashPlusByCode(code: string): Promise<{ redirectUrl: string }> {
+    const raw = String(code || '').trim().replace(/[^A-Za-z0-9]/g, '');
+    if (!raw) {
+      throw new ValidationError('קוד אירוע חסר');
+    }
+    const event = await Event.findOne({ eventCode: { $regex: `^${raw}$`, $options: 'i' } });
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
+    if (event.flashTier === 'plus') {
+      throw new ValidationError('האירוע כבר משודרג ל-פלאש+');
+    }
+    const ownerId = event.userId.toString();
+    const created = await this.createSumitPayment(ownerId, event._id.toString(), 0, undefined, 'flash_plus');
+    if (!created.paymentId) {
+      throw new AppError('Failed to create Flash+ payment', 500);
+    }
+    return this.beginSumitRedirect(created.paymentId, ownerId);
+  }
+
+  async verifyFlashPlusByPayment(
+    paymentId: string
+  ): Promise<{ success: boolean; message?: string; eventCode?: string; flashTier?: string }> {
+    const payment = await Payment.findById(paymentId);
+    if (!payment) {
+      throw new NotFoundError('Payment');
+    }
+    if (payment.metadata?.product !== 'flash_plus') {
+      throw new ValidationError('Unsupported payment');
+    }
+    const result = await this.verifySumitRedirect(paymentId, payment.userId.toString());
+    const event = await Event.findById(payment.eventId).lean();
+    return {
+      success: result.success,
+      message: result.message,
+      eventCode: event?.eventCode,
+      flashTier: event?.flashTier,
+    };
   }
 
   async getPayment(paymentId: string, userId: string): Promise<IPayment> {

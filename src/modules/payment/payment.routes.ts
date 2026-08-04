@@ -48,6 +48,10 @@ router.post(
   paymentController.verifySumitRedirect
 );
 
+// Public — code-in-link Flash+ upgrade (couple not logged in; uses event code from the QR/link)
+router.post('/flash-plus/begin', paymentController.beginFlashPlus);
+router.post('/flash-plus/verify', paymentController.verifyFlashPlus);
+
 // Get single payment
 router.get('/:paymentId', protect, paymentController.getPayment);
 
