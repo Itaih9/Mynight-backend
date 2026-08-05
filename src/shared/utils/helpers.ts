@@ -38,6 +38,32 @@ export const formatPhoneNumber = (phone: string): string => {
   return digits ? `+972${digits}` : '';
 };
 
+/**
+ * Israeli mobile check, run on the NORMALISED number so 050-123-4567,
+ * 0501234567, +972501234567 and 972-50-1234567 all validate identically.
+ * Mobile prefixes are 05X + 7 digits → +9725XXXXXXXX.
+ */
+export const isValidIsraeliMobile = (phone: string): boolean =>
+  /^\+9725\d{8}$/.test(formatPhoneNumber(phone));
+
+/** Deliberately permissive — catches typos, not exotic-but-legal addresses. */
+export const isValidEmail = (email: string): boolean =>
+  /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/.test(String(email).trim());
+
+/**
+ * A wedding date has to be today or later (you can't collect photos for a
+ * wedding that already happened) and inside a sane horizon.
+ */
+export const isValidWeddingDate = (value: unknown, yearsAhead = 4): boolean => {
+  const d = new Date(value as any);
+  if (isNaN(d.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const max = new Date();
+  max.setFullYear(max.getFullYear() + yearsAhead);
+  return d >= today && d <= max;
+};
+
 export const isExpired = (date: Date, days: number = 30): boolean => {
   const now = new Date();
   const expiryDate = new Date(date);

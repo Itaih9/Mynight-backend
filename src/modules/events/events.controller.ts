@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import QRCode from 'qrcode';
 import { planFor } from '@/shared/config/flashPlans';
+import { isValidIsraeliMobile, isValidEmail, isValidWeddingDate } from '@/shared/utils/helpers';
 import { eventsService } from './events.service';
 import { AuthRequest } from '@/shared/middleware/auth.middleware';
 import { env } from '@/shared/config/env';
@@ -207,8 +208,19 @@ export class EventsController {
         res.status(400).json({ success: false, error: 'שם הזוג נדרש' });
         return;
       }
+      if (String(coupleName).trim().length < 2) {
+        res.status(400).json({ success: false, error: 'שם הזוג קצר מדי' });
+        return;
+      }
       if (!phoneNumber || !String(phoneNumber).trim()) {
         res.status(400).json({ success: false, error: 'מספר טלפון נדרש' });
+        return;
+      }
+      // Format matters here: the phone is the couple's login to the album, so a
+      // typo means they can never reach it — and the number is also the key
+      // registration is idempotent on.
+      if (!isValidIsraeliMobile(String(phoneNumber))) {
+        res.status(400).json({ success: false, error: 'מספר טלפון לא תקין — נסו בפורמט 050-0000000' });
         return;
       }
       // Email is required, not optional: the entire pre-wedding upsell sequence
@@ -218,15 +230,20 @@ export class EventsController {
         res.status(400).json({ success: false, error: 'אימייל נדרש' });
         return;
       }
+      if (!isValidEmail(String(email))) {
+        res.status(400).json({ success: false, error: 'כתובת אימייל לא תקינה' });
+        return;
+      }
       const date = new Date(weddingDate);
       if (!weddingDate || isNaN(date.getTime())) {
         res.status(400).json({ success: false, error: 'תאריך חתונה נדרש' });
         return;
       }
       // A past date would expire the event on creation and make it invisible to
-      // the upsell sweep, which only looks forward.
-      if (date.getTime() < Date.now() - 24 * 60 * 60 * 1000) {
-        res.status(400).json({ success: false, error: 'תאריך החתונה חייב להיות בעתיד' });
+      // the upsell sweep, which only looks forward. The upper bound catches
+      // mistyped years (2062 instead of 2026) that would park a lead forever.
+      if (!isValidWeddingDate(date)) {
+        res.status(400).json({ success: false, error: 'תאריך החתונה חייב להיות בעתיד (ועד 4 שנים קדימה)' });
         return;
       }
 
