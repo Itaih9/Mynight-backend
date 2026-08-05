@@ -339,7 +339,7 @@ class EmailService {
         </div>
       </div>
       <p style="margin:0 0 4px 0;font-size:14px;line-height:1.8;color:${BRAND.text};"><strong>איך רואים את התמונות?</strong></p>
-      <p style="margin:0 0 20px 0;font-size:14px;line-height:1.8;color:${BRAND.muted};">בבוקר שאחרי החתונה, היכנסו ל-<a href="${env.FRONTEND_URL}/login" style="color:${BRAND.accentDark};">${env.FRONTEND_URL.replace(/^https?:\/\//, '')}/login</a> עם מספר הטלפון ${phoneLocal ? `<strong style="color:${BRAND.text};" dir="ltr">${phoneLocal}</strong>` : 'שאיתו נרשמתם'} — האלבום שלכם יחכה שם.</p>
+      <p style="margin:0 0 20px 0;font-size:14px;line-height:1.8;color:${BRAND.muted};">בבוקר שאחרי החתונה, היכנסו ל-<a href="${env.FRONTEND_URL}/login?method=phone" style="color:${BRAND.accentDark};">${env.FRONTEND_URL.replace(/^https?:\/\//, '')}/login</a> עם מספר הטלפון ${phoneLocal ? `<strong style="color:${BRAND.text};" dir="ltr">${phoneLocal}</strong>` : 'שאיתו נרשמתם'} — האלבום שלכם יחכה שם.</p>
       ${rule()}
       <div style="background:#FFF7F7;border:1px solid ${BRAND.border};border-radius:12px;padding:22px 24px;margin:8px 0 0 0;text-align:center;">
         <p style="margin:0 0 8px 0;font-size:11px;font-weight:700;letter-spacing:2px;color:${BRAND.accentDark};">החבילה החכמה של My Night</p>
