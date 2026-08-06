@@ -476,6 +476,50 @@ class EmailService {
     });
   }
 
+  /** Lead alert for a new פלאש signup — the free tier's counterpart to the payment notification. */
+  async sendSignupAdminNotification(opts: {
+    coupleName: string;
+    eventCode: string;
+    weddingDate?: Date;
+    phoneNumber?: string;
+    contactEmail?: string;
+    tier: 'basic' | 'plus';
+  }): Promise<void> {
+    const { coupleName, eventCode, weddingDate, phoneNumber, contactEmail, tier } = opts;
+
+    const row = (label: string, value: string) =>
+      `<tr><td style="padding:8px 0;font-size:14px;color:${BRAND.muted};white-space:nowrap;">${label}</td>
+        <td style="padding:8px 0 8px 16px;font-size:14px;font-weight:600;color:${BRAND.text};">${value}</td></tr>`;
+
+    let dateStr = '—';
+    if (weddingDate) {
+      dateStr = weddingDate.toLocaleDateString('he-IL', { day: 'numeric', month: 'long', year: 'numeric' });
+      // How long the upsell window actually is — the whole pre-wedding sequence
+      // has to land before this date, so it is the first thing worth knowing.
+      const days = Math.ceil((weddingDate.getTime() - Date.now()) / 86_400_000);
+      if (days > 0) dateStr += ` · בעוד ${days} ימים`;
+    }
+
+    const body = `
+      <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:${BRAND.primary};">הרשמה חדשה לפלאש ✨</h1>
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;margin-top:16px;border-collapse:collapse;">
+        ${row('הזוג', coupleName)}
+        ${row('קוד אירוע', eventCode)}
+        ${row('תאריך חתונה', dateStr)}
+        ${row('טלפון', phoneNumber || '—')}
+        ${row('אימייל', contactEmail || '—')}
+        ${row('חבילה', tier === 'plus' ? 'פלאש+' : 'פלאש (חינם)')}
+      </table>
+      ${button(`${env.FRONTEND_URL}/camera/${eventCode}`, 'מצלמת האורחים')}
+    `;
+
+    await this.sendEmail({
+      to: env.ADMIN_NOTIFY_EMAIL,
+      subject: `✨ הרשמה חדשה — ${coupleName} (${eventCode})`,
+      htmlBody: renderLayout({ preheader: `${coupleName} · ${dateStr}`, body, dir: 'rtl' }),
+    });
+  }
+
   async sendEventShareEmail(to: string, eventName: string, eventCode: string): Promise<void> {
     const shareUrl = `${env.FRONTEND_URL}/selfie?code=${eventCode}`;
     const subject = `You are invited to view ${eventName} photos`;

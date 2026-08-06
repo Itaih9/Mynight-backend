@@ -205,6 +205,25 @@ class EventsService {
       logger.error(`Free פלאש welcome mail failed for ${eventCode}: ${(err as Error).message}`);
     }
 
+    // Lead alert. Only on isNew — registration is idempotent per phone, so a
+    // couple returning to the form must not re-notify. Service-created events
+    // are QA fixtures rather than real signups, so they stay silent.
+    if (!opts?.createdByService) {
+      try {
+        const { emailService } = await import('@/shared/services/email.service');
+        await emailService.sendSignupAdminNotification({
+          coupleName: data.coupleName,
+          eventCode,
+          weddingDate: data.weddingDate,
+          phoneNumber: user.phoneNumber,
+          contactEmail: data.email || user.email,
+          tier: (event.flashTier as 'basic' | 'plus') || 'basic',
+        });
+      } catch (err) {
+        logger.error(`Signup admin alert failed for ${eventCode}: ${(err as Error).message}`);
+      }
+    }
+
     return { event, isNew: true };
   }
 
