@@ -37,7 +37,7 @@ class AdminService {
     }
   }
 
-  async login(email: string, password: string): Promise<{ email: string }> {
+  async login(email: string, password: string): Promise<{ email: string; emailDelivered: boolean }> {
     const admin = await Admin.findOne({ email: email.toLowerCase(), isActive: true });
     if (!admin) {
       throw new ValidationError('Invalid email or password');
@@ -54,9 +54,19 @@ class AdminService {
     setTimeout(() => adminOtpStore.delete(email.toLowerCase()), 10 * 60 * 1000);
 
     const { emailService } = await import('@/shared/services/email.service');
-    await emailService.sendOTPEmail(admin.email, otp);
+    // The OTP is already in adminOtpStore and verifyOtp will accept it — only
+    // delivery can fail here. Letting that throw turned a mail-provider outage
+    // into a total lockout from the admin panel, with no way back in short of a
+    // deploy. Report it to the caller instead so the OTP screen still loads.
+    let emailDelivered = true;
+    try {
+      await emailService.sendOTPEmail(admin.email, otp);
+    } catch (error: any) {
+      emailDelivered = false;
+      logger.error(`Admin OTP delivery failed for ${admin.email}: ${error.message}`);
+    }
 
-    return { email: admin.email };
+    return { email: admin.email, emailDelivered };
   }
 
   async verifyOtp(email: string, otp: string): Promise<{ admin: IAdmin; token: string }> {

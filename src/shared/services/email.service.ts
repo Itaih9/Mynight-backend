@@ -142,8 +142,15 @@ function rule(): string {
 class EmailService {
   private fromEmail = SENDGRID_ENABLED ? env.SENDGRID_FROM_EMAIL! : env.SES_EMAIL_FROM;
   private fromName = env.SENDGRID_FROM_NAME || BRAND.name;
+  // SES rejects any Source that isn't a verified identity, and the two providers
+  // verify senders independently — so the SendGrid address is not automatically
+  // usable here. Falls back to it anyway: both live under mynight.co.il, which is
+  // verified as a domain in SES, so any address on it is a valid Source.
+  private sesFromEmail = env.SES_EMAIL_FROM || env.SENDGRID_FROM_EMAIL!;
 
-  async sendEmail({ to, subject, htmlBody, textBody, attachments }: SendEmailParams): Promise<void> {
+  async sendEmail(params: SendEmailParams): Promise<void> {
+    const { to, subject, htmlBody, textBody, attachments } = params;
+
     if (SENDGRID_ENABLED) {
       try {
         await sgMail.send({
@@ -168,15 +175,28 @@ class EmailService {
         return;
       } catch (error: any) {
         const detail = error?.response?.body?.errors?.[0]?.message || error.message;
-        logger.error(`SendGrid send failed to ${to}: ${detail}`);
-        throw new AppError(`Email sending failed: ${detail}`, 500);
+        // A provider-level failure — exhausted credits, revoked key, lapsed plan
+        // — is account-wide and lasts until someone fixes the billing. Throwing
+        // here took the whole product down with it: admin login is gated behind
+        // an emailed OTP, so an empty SendGrid balance locked us out of our own
+        // admin panel. Fall through to SES, and only fail if that dies too.
+        logger.error(`SendGrid send failed to ${to}: ${detail} — falling back to SES`);
       }
     }
 
+    await this.sendViaSes(params);
+  }
+
+  /**
+   * Attachments are dropped here: this uses sendEmail, and attachment support
+   * would need sendRawEmail with hand-built MIME. Any mail that attaches
+   * something has to still make sense without it.
+   */
+  private async sendViaSes({ to, subject, htmlBody, textBody }: SendEmailParams): Promise<void> {
     try {
       await ses
         .sendEmail({
-          Source: this.fromEmail,
+          Source: this.sesFromEmail,
           Destination: { ToAddresses: [to] },
           Message: {
             // Charset is REQUIRED for Hebrew. SES falls back to 7-bit ASCII when

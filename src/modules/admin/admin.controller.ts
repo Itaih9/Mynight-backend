@@ -11,8 +11,10 @@ export class AdminController {
       const result = await adminService.login(email, password);
       res.json({
         success: true,
-        data: { email: result.email, requiresOtp: true },
-        message: 'OTP sent to your email',
+        data: { email: result.email, requiresOtp: true, emailDelivered: result.emailDelivered },
+        message: result.emailDelivered
+          ? 'OTP sent to your email'
+          : 'Code generated, but it could not be emailed — check the mail provider',
       });
     } catch (error) {
       next(error);
