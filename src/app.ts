@@ -16,6 +16,7 @@ import contactRoutes from './modules/contact/contact.routes';
 import guestsRoutes from './modules/guests/guests.routes';
 import reviewRoutes from './modules/review/review.routes';
 import packagesRoutes from './modules/packages/packages.routes';
+import clientLogRoutes from './modules/clientLog/clientLog.routes';
 
 export const createApp = (): Application => {
   const app = express();
@@ -64,6 +65,7 @@ export const createApp = (): Application => {
   app.use('/api/guests', guestsRoutes);
   app.use('/api/reviews', reviewRoutes);
   app.use('/api/packages', packagesRoutes);
+  app.use('/api/client-log', clientLogRoutes);
 
   app.use((_req: Request, res: Response) => {
     res.status(404).json({
