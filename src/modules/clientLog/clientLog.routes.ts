@@ -50,6 +50,8 @@ router.post('/camera', clientLogLimiter, (req: Request, res: Response) => {
     field('muted', b.muted, 6),
     field('track', b.readyState, 12),
     field('vis', b.visibility, 10),
+    field('mode', b.mode, 8),
+    field('rec', b.recording, 6),
     field('detail', b.detail, 300),
     field('ua', b.ua, 180),
   ]
