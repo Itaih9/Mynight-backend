@@ -16,6 +16,32 @@ const SHOWCASE_CACHE_TTL = 300000; // 5 min — so S3 showcase edits show up qui
 const SHUFFLE_CACHE_TTL = 300000;
 const PHOTO_GALLERY_FIELDS = '_id s3Key posterUrl category aiCategories indexedFaces uploaderName uploadedBy createdAt metadata.mimeType metadata.width metadata.height';
 
+/**
+ * Normalise an event reference before looking it up.
+ *
+ * Guests reach these endpoints by typing or pasting a code at a venue, and a
+ * pasted link routinely carries a trailing space — or, when copied out of RTL
+ * Hebrew, an invisible bidi mark (U+200E/U+200F) that nobody can see. Both used
+ * to 404 as "event not found", which to the guest is indistinguishable from
+ * having the wrong code entirely, so they give up instead of retrying.
+ *
+ * Slugs keep their punctuation (hyphens are legal); codes are strictly
+ * alphanumeric, so anything else in one is paste damage and gets dropped.
+ */
+// Zero-width spaces, LRM/RLM, the bidi embedding/override set, and the BOM.
+// Built from an escaped string rather than a regex literal so the source stays
+// pure ASCII — pasting these characters in raw would make this line impossible
+// to read or review, which is the exact problem it exists to solve.
+const INVISIBLES = new RegExp('[\\u200B-\\u200F\\u202A-\\u202E\\u2066-\\u2069\\uFEFF]', 'g');
+
+function normalizeEventRef(raw: string): { slug: string; code: string } {
+  const cleaned = String(raw || '').trim().replace(INVISIBLES, '');
+  return {
+    slug: cleaned.toLowerCase(),
+    code: cleaned.toUpperCase().replace(/[^A-Z0-9]/g, ''),
+  };
+}
+
 function hashStringToInt(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) {
@@ -578,9 +604,10 @@ class PhotosService {
   }
 
   private async findEventByCodeOrSlug(eventCodeOrSlug: string): Promise<IEvent> {
-    let event = await Event.findOne({ customSlug: eventCodeOrSlug.toLowerCase() });
-    if (!event) {
-      event = await Event.findOne({ eventCode: eventCodeOrSlug.toUpperCase() });
+    const { slug, code } = normalizeEventRef(eventCodeOrSlug);
+    let event = await Event.findOne({ customSlug: slug });
+    if (!event && code) {
+      event = await Event.findOne({ eventCode: code });
     }
     if (!event) {
       throw new NotFoundError('Event');
@@ -669,8 +696,10 @@ class PhotosService {
   // not the generic isPaid/expiry checks — the admin enabling it is the
   // authorization, so comped/test events work too.
   private async findEventForDisposable(eventCodeOrSlug: string): Promise<IEvent> {
-    let event = await Event.findOne({ customSlug: eventCodeOrSlug.toLowerCase() });
-    if (!event) event = await Event.findOne({ eventCode: eventCodeOrSlug.toUpperCase() });
+    const { slug, code } = normalizeEventRef(eventCodeOrSlug);
+    if (!slug && !code) throw new NotFoundError('Event');
+    let event = await Event.findOne({ customSlug: slug });
+    if (!event && code) event = await Event.findOne({ eventCode: code });
     if (!event) throw new NotFoundError('Event');
     return event;
   }
