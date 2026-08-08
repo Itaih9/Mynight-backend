@@ -56,7 +56,10 @@ router.post('/camera', clientLogLimiter, (req: Request, res: Response) => {
     .filter(Boolean)
     .join(' ');
 
-  logger.info(`[camera] ${line}`);
+  // warn, not info: the logger defaults to level 'warn' in production, so info
+  // is discarded before it reaches any transport — a diagnostic channel nobody
+  // can read is worse than none. Volume is bounded by the rate limiter above.
+  logger.warn(`[camera] ${line}`);
   // 204: the client uses sendBeacon, which ignores the body anyway, and this
   // must never be something the camera waits on.
   res.status(204).end();
