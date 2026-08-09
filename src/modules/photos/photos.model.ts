@@ -7,6 +7,14 @@ export interface IPhoto extends Document {
   thumbnailUrl: string;
   posterUrl?: string;
   category?: string | null;
+  /**
+   * The photographer's own relative path for this file, e.g.
+   * "batch 3of/חופה/IMG_2910.jpg". Kept because s3Key is flattened, so without
+   * it the folder structure is gone the moment the upload finishes — when the
+   * category rule turned out to be wrong, several thousand already-uploaded
+   * photos could not be recategorised and had to stay wrong.
+   */
+  originalPath?: string | null;
   aiCategories?: string[];
   /** Disposable-camera device that shot this photo (for the per-guest limit). */
   deviceId?: string;
@@ -59,6 +67,10 @@ const photoSchema = new Schema<IPhoto>(
       type: String,
     },
     category: {
+      type: String,
+      default: null,
+    },
+    originalPath: {
       type: String,
       default: null,
     },

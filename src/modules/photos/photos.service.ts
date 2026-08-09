@@ -106,15 +106,23 @@ export function normalizeCategory(raw?: string | null): string | null {
 }
 
 /**
- * Derive a category from a file's (relative) path by taking the top-level
- * subfolder — e.g. "01_huppah/img_001.jpg" -> "huppah". Files with no subfolder
- * (e.g. "img_001.jpg") return null. Handles both "/" and "\" separators.
+ * Derive a category from a file's (relative) path by taking the folder the file
+ * actually sits in — e.g. "01_huppah/img_001.jpg" -> "huppah", and
+ * "arielandgal photo download 10of/חופה/img_001.jpg" -> "חופה". Files with no
+ * subfolder (e.g. "img_001.jpg") return null. Handles "/" and "\" separators.
+ *
+ * This used to take the TOP-level segment, which is only the same thing when
+ * the upload is one level deep. Photographers deliver a wrapper folder per
+ * batch with the real sections nested inside, so the categories came out as
+ * "arielandgal photo download 10of", "…11of", "…12of" — one meaningless entry
+ * per batch, and the actual sections (חופה, ריקודים) never surfaced at all.
+ * The deepest folder is the one the photographer named for its contents.
  */
 export function categoryFromPath(path?: string | null): string | null {
   if (!path) return null;
   const segments = path.replace(/\\/g, '/').split('/').filter(Boolean);
   if (segments.length < 2) return null;
-  return normalizeCategory(segments[0]);
+  return normalizeCategory(segments[segments.length - 2]);
 }
 
 export interface ShowcaseFace {
@@ -262,6 +270,7 @@ class PhotosService {
       thumbnailUrl,
       ...(posterUrl ? { posterUrl } : {}),
       category: categoryFromPath(path),
+      originalPath: path,
       uploadedBy: 'owner',
       uploaderName: 'צלם האירוע',
       metadata,

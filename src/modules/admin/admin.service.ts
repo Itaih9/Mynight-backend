@@ -888,6 +888,7 @@ class AdminService {
         url,
         thumbnailUrl,
         category: categoryFromPath(file.originalname),
+        originalPath: file.originalname,
         uploadedBy: 'owner',
         uploaderName: 'צלם האירוע',
         metadata: {
@@ -976,6 +977,7 @@ class AdminService {
         thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${upload.s3Key}`,
         ...(posterUrl ? { posterUrl } : {}),
         category: categoryFromPath(upload.path),
+        originalPath: upload.path,
         uploadedBy: 'owner',
         uploaderName: 'צלם האירוע',
         metadata: {
@@ -1255,6 +1257,7 @@ class AdminService {
             url: `${env.CLOUDFRONT_URL}/${photoS3Key}`,
             thumbnailUrl: `${env.CLOUDFRONT_URL}/thumbnails/${photoS3Key}`,
             category,
+            originalPath: filePath,
             uploadedBy: 'owner',
             uploaderName: 'צלם האירוע',
             metadata: {
