@@ -35,6 +35,15 @@ interface EnvConfig {
   WATI_OTP_TEMPLATE?: string;
   SENDGRID_FROM_EMAIL?: string;
   SENDGRID_FROM_NAME?: string;
+  /**
+   * Brevo (formerly Sendinblue). Tried FIRST when set: SendGrid ran out of
+   * credits and SES is sandboxed, so this is the provider that actually
+   * delivers. Free tier is 300/day, which covers current volume several times
+   * over. Sender must be on a domain authenticated in Brevo, or mail is
+   * rejected outright rather than merely landing in spam.
+   */
+  BREVO_API_KEY?: string;
+  BREVO_FROM_EMAIL?: string;
   // Where new-payment notifications are sent.
   ADMIN_NOTIFY_EMAIL: string;
   SUMIT_COMPANY_ID: string;
@@ -78,6 +87,8 @@ export const env: EnvConfig = {
   WATI_OTP_TEMPLATE: process.env.WATI_OTP_TEMPLATE,
   SENDGRID_FROM_EMAIL: process.env.SENDGRID_FROM_EMAIL,
   SENDGRID_FROM_NAME: process.env.SENDGRID_FROM_NAME,
+  BREVO_API_KEY: process.env.BREVO_API_KEY,
+  BREVO_FROM_EMAIL: process.env.BREVO_FROM_EMAIL,
   ADMIN_NOTIFY_EMAIL: process.env.ADMIN_NOTIFY_EMAIL || 'itaih9@gmail.com',
   SUMIT_COMPANY_ID: getEnv('SUMIT_COMPANY_ID', ''),
   SUMIT_API_KEY: getEnv('SUMIT_API_KEY', ''),

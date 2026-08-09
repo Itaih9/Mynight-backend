@@ -1,4 +1,5 @@
 import sgMail from '@sendgrid/mail';
+import axios from 'axios';
 import { ses } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
 import logger from '@/shared/utils/logger';
@@ -31,13 +32,17 @@ interface SendEmailParams {
 }
 
 const SENDGRID_ENABLED = Boolean(env.SENDGRID_API_KEY && env.SENDGRID_FROM_EMAIL);
+const BREVO_ENABLED = Boolean(env.BREVO_API_KEY);
 
-if (SENDGRID_ENABLED) {
-  sgMail.setApiKey(env.SENDGRID_API_KEY!);
-  logger.info('Email provider: SendGrid');
-} else {
-  logger.info('Email provider: AWS SES (SendGrid not configured)');
-}
+if (SENDGRID_ENABLED) sgMail.setApiKey(env.SENDGRID_API_KEY!);
+
+// warn, not info: the logger sits at 'warn' in production, and knowing which
+// providers were live at boot is the first thing you want when mail stops.
+logger.warn(
+  `Email providers available: ${[BREVO_ENABLED && 'Brevo', SENDGRID_ENABLED && 'SendGrid', 'SES']
+    .filter(Boolean)
+    .join(' -> ')}`
+);
 
 const BRAND = {
   // Served from our own domain, not a free image host. The previous postimg.cc
@@ -147,44 +152,114 @@ class EmailService {
   // usable here. Falls back to it anyway: both live under mynight.co.il, which is
   // verified as a domain in SES, so any address on it is a valid Source.
   private sesFromEmail = env.SES_EMAIL_FROM || env.SENDGRID_FROM_EMAIL!;
+  // Brevo rejects a sender whose domain isn't authenticated in the Brevo
+  // account, so this must be an address on the domain set up there.
+  private brevoFromEmail = env.BREVO_FROM_EMAIL || env.SENDGRID_FROM_EMAIL || env.SES_EMAIL_FROM;
 
+  /**
+   * Send through the first provider that accepts the message.
+   *
+   * A provider-level failure — exhausted credits, revoked key, lapsed plan — is
+   * account-wide and lasts until someone fixes the billing. With a single
+   * provider that took the whole product down: sign-in is gated behind an
+   * emailed code, so an empty SendGrid balance locked customers out of albums
+   * they had paid for, and locked us out of our own admin panel. Hence a chain,
+   * and hence the order.
+   *
+   * Brevo first because it is the one that actually delivers: SendGrid ran dry
+   * on 2026-08-04 and SES is still sandboxed (it can only reach addresses
+   * verified in the AWS account, which no customer ever will be). SES stays on
+   * the end as a last resort that at least reaches our own verified addresses.
+   */
   async sendEmail(params: SendEmailParams): Promise<void> {
-    const { to, subject, htmlBody, textBody, attachments } = params;
+    const { to, subject } = params;
 
-    if (SENDGRID_ENABLED) {
+    const chain: { name: string; send: () => Promise<void> }[] = [];
+    if (BREVO_ENABLED) chain.push({ name: 'Brevo', send: () => this.sendViaBrevo(params) });
+    if (SENDGRID_ENABLED) chain.push({ name: 'SendGrid', send: () => this.sendViaSendGrid(params) });
+    chain.push({ name: 'SES', send: () => this.sendViaSes(params) });
+
+    const failures: string[] = [];
+    for (const provider of chain) {
       try {
-        await sgMail.send({
-          to,
-          from: { email: this.fromEmail, name: this.fromName },
-          subject,
-          html: htmlBody,
-          text: textBody || htmlBody.replace(/<[^>]*>/g, ''),
-          ...(attachments?.length
-            ? {
-                attachments: attachments.map((a) => ({
-                  filename: a.filename,
-                  content: a.contentBase64 ?? Buffer.from(a.content ?? '', 'utf-8').toString('base64'),
-                  type: a.type,
-                  disposition: a.contentId ? ('inline' as const) : ('attachment' as const),
-                  ...(a.contentId ? { content_id: a.contentId } : {}),
-                })),
-              }
-            : {}),
-        });
-        logger.info(`Email sent to ${to} via SendGrid: ${subject}`);
+        await provider.send();
+        if (failures.length) {
+          // Succeeding only after a fallback means the primary is broken —
+          // that belongs at warn, where it will actually be seen, rather than
+          // dying at info like every successful send before it.
+          logger.warn(`Email to ${to} sent via ${provider.name} after ${failures.join(' | ')}`);
+        } else {
+          logger.info(`Email sent to ${to} via ${provider.name}: ${subject}`);
+        }
         return;
       } catch (error: any) {
-        const detail = error?.response?.body?.errors?.[0]?.message || error.message;
-        // A provider-level failure — exhausted credits, revoked key, lapsed plan
-        // — is account-wide and lasts until someone fixes the billing. Throwing
-        // here took the whole product down with it: admin login is gated behind
-        // an emailed OTP, so an empty SendGrid balance locked us out of our own
-        // admin panel. Fall through to SES, and only fail if that dies too.
-        logger.error(`SendGrid send failed to ${to}: ${detail} — falling back to SES`);
+        failures.push(`${provider.name} failed (${error.message})`);
       }
     }
 
-    await this.sendViaSes(params);
+    logger.error(`Email to ${to} failed on every provider: ${failures.join(' | ')}`);
+    throw new AppError(`Email sending failed: ${failures.join(' | ')}`, 500);
+  }
+
+  private async sendViaSendGrid({ to, subject, htmlBody, textBody, attachments }: SendEmailParams): Promise<void> {
+    try {
+      await sgMail.send({
+        to,
+        from: { email: this.fromEmail, name: this.fromName },
+        subject,
+        html: htmlBody,
+        text: textBody || htmlBody.replace(/<[^>]*>/g, ''),
+        ...(attachments?.length
+          ? {
+              attachments: attachments.map((a) => ({
+                filename: a.filename,
+                content: a.contentBase64 ?? Buffer.from(a.content ?? '', 'utf-8').toString('base64'),
+                type: a.type,
+                disposition: a.contentId ? ('inline' as const) : ('attachment' as const),
+                ...(a.contentId ? { content_id: a.contentId } : {}),
+              })),
+            }
+          : {}),
+      });
+    } catch (error: any) {
+      throw new Error(error?.response?.body?.errors?.[0]?.message || error.message);
+    }
+  }
+
+  /**
+   * Brevo's transactional endpoint. Inline (cid:) images are sent as ordinary
+   * attachments — Brevo has no content-id equivalent here — so any mail that
+   * embeds an image has to still read correctly with it detached, which is the
+   * same constraint the SES path already imposes.
+   */
+  private async sendViaBrevo({ to, subject, htmlBody, textBody, attachments }: SendEmailParams): Promise<void> {
+    try {
+      const res = await axios.post(
+        'https://api.brevo.com/v3/smtp/email',
+        {
+          sender: { email: this.brevoFromEmail, name: this.fromName },
+          to: [{ email: to }],
+          subject,
+          htmlContent: htmlBody,
+          textContent: textBody || htmlBody.replace(/<[^>]*>/g, ''),
+          ...(attachments?.length
+            ? {
+                attachment: attachments.map((a) => ({
+                  name: a.filename,
+                  content: a.contentBase64 ?? Buffer.from(a.content ?? '', 'utf-8').toString('base64'),
+                })),
+              }
+            : {}),
+        },
+        {
+          headers: { 'api-key': env.BREVO_API_KEY!, 'Content-Type': 'application/json' },
+          timeout: 20000,
+        }
+      );
+      if (!res.data?.messageId) throw new Error('Brevo accepted the request but returned no messageId');
+    } catch (error: any) {
+      throw new Error(error?.response?.data?.message || error?.response?.data?.code || error.message);
+    }
   }
 
   /**
@@ -209,11 +284,10 @@ class EmailService {
           },
         })
         .promise();
-
-      logger.info(`Email sent to ${to} via SES: ${subject}`);
     } catch (error: any) {
-      logger.error(`Failed to send email to ${to}: ${error.message}`);
-      throw new AppError(`Email sending failed: ${error.message}`, 500);
+      // Plain Error, not AppError: sendEmail owns the logging and the final
+      // failure, so every provider in the chain reports the same way.
+      throw new Error(error.message);
     }
   }
 
