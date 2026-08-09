@@ -26,6 +26,13 @@ interface EnvConfig {
   // https://live-mt-server.wati.io/123456
   WATI_API_ENDPOINT?: string;
   WATI_ACCESS_TOKEN?: string;
+  /**
+   * Name of the approved Wati template used to deliver login/registration
+   * codes. WhatsApp only permits pre-approved templates, so the wording lives
+   * in Wati/Meta — we just pass the code as a named parameter. Unset means the
+   * WhatsApp OTP fallback stays off.
+   */
+  WATI_OTP_TEMPLATE?: string;
   SENDGRID_FROM_EMAIL?: string;
   SENDGRID_FROM_NAME?: string;
   // Where new-payment notifications are sent.
@@ -68,6 +75,7 @@ export const env: EnvConfig = {
   SENDGRID_API_KEY: process.env.SENDGRID_API_KEY,
   WATI_API_ENDPOINT: process.env.WATI_API_ENDPOINT,
   WATI_ACCESS_TOKEN: process.env.WATI_ACCESS_TOKEN,
+  WATI_OTP_TEMPLATE: process.env.WATI_OTP_TEMPLATE,
   SENDGRID_FROM_EMAIL: process.env.SENDGRID_FROM_EMAIL,
   SENDGRID_FROM_NAME: process.env.SENDGRID_FROM_NAME,
   ADMIN_NOTIFY_EMAIL: process.env.ADMIN_NOTIFY_EMAIL || 'itaih9@gmail.com',

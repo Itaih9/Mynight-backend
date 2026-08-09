@@ -6,7 +6,8 @@ import { Event } from '../events/events.model';
 import { eventsService } from '../events/events.service';
 import { couponService } from '../coupon/coupon.service';
 import { env } from '@/shared/config/env';
-import { NotFoundError, ValidationError } from '@/shared/utils/errors';
+import { AppError, NotFoundError, ValidationError } from '@/shared/utils/errors';
+import { whatsappService } from '@/shared/services/whatsapp.service';
 import { generateOTP, generateReferralCode, formatPhoneNumber, generateCustomSlug } from '@/shared/utils/helpers';
 import logger from '@/shared/utils/logger';
 import { emailService } from '@/shared/services/email.service';
@@ -25,6 +26,51 @@ import {
 const otpStore = new Map<string, { otp: string; expiresAt: Date }>();
 
 class AuthService {
+  /**
+   * Deliver a login/registration code: email first, WhatsApp as the fallback.
+   *
+   * The fallback exists because an email outage locks every customer out of
+   * their own album. SendGrid ran out of credits on 2026-08-04 and SES is still
+   * sandboxed — so no customer address can be delivered to — and this send used
+   * to be awaited bare, which threw straight out of loginSendOTP and 500'd the
+   * request. A paying couple could not reach the album they had just bought.
+   *
+   * A phone number is the one contact detail we always have (it IS the login
+   * identifier), so WhatsApp is the natural second channel here. It stays off
+   * until WATI_API_ENDPOINT/WATI_ACCESS_TOKEN and an approved WATI_OTP_TEMPLATE
+   * are set, because WhatsApp only permits pre-approved templates.
+   *
+   * Throws only when every channel fails, and with a message the guest can act
+   * on rather than a generic 500.
+   */
+  private async deliverOtp(otp: string, to: { email?: string; phoneNumber: string }): Promise<'email' | 'whatsapp'> {
+    if (to.email) {
+      try {
+        await emailService.sendOTPEmail(to.email, otp);
+        return 'email';
+      } catch (error: any) {
+        logger.error(`OTP email failed for ${to.email}: ${error.message}`);
+      }
+    }
+
+    if (whatsappService.isConfigured && env.WATI_OTP_TEMPLATE) {
+      try {
+        await whatsappService.sendTemplate({
+          to: to.phoneNumber,
+          templateName: env.WATI_OTP_TEMPLATE,
+          broadcastName: 'login-otp',
+          parameters: [{ name: 'code', value: otp }],
+        });
+        logger.warn(`OTP delivered by WhatsApp to ${to.phoneNumber} (email unavailable)`);
+        return 'whatsapp';
+      } catch (error: any) {
+        logger.error(`OTP WhatsApp failed for ${to.phoneNumber}: ${error.message}`);
+      }
+    }
+
+    throw new AppError('לא הצלחנו לשלוח את קוד האימות כרגע. נסו שוב בעוד רגע, או פנו אלינו ונפתח לכם גישה.', 503);
+  }
+
   async loginSendOTP(data: LoginSendOTPRequest): Promise<{ success: boolean; message: string }> {
     const phoneNumber = formatPhoneNumber(data.phoneNumber);
 
@@ -39,15 +85,13 @@ class AuthService {
 
     otpStore.set(phoneNumber, { otp, expiresAt });
 
-    if (user.email) {
-      await emailService.sendOTPEmail(user.email, otp);
-    }
+    const via = await this.deliverOtp(otp, { email: user.email, phoneNumber });
 
     setTimeout(() => otpStore.delete(phoneNumber), 10 * 60 * 1000);
 
     return {
       success: true,
-      message: 'OTP sent successfully',
+      message: via === 'whatsapp' ? 'OTP sent by WhatsApp' : 'OTP sent successfully',
     };
   }
 
@@ -204,16 +248,14 @@ class AuthService {
 
     otpStore.set(phoneNumber, { otp, expiresAt });
 
-    if (data.email) {
-      await emailService.sendOTPEmail(data.email, otp);
-    }
+    const via = await this.deliverOtp(otp, { email: data.email, phoneNumber });
 
     setTimeout(() => otpStore.delete(phoneNumber), 10 * 60 * 1000);
 
     return {
       success: true,
       isNewUser,
-      message: 'OTP sent successfully',
+      message: via === 'whatsapp' ? 'OTP sent by WhatsApp' : 'OTP sent successfully',
     };
   }
 
