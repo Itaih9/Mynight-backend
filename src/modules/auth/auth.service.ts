@@ -364,9 +364,46 @@ class AuthService {
 
     let user = data.phoneNumber ? await User.findOne({ phoneNumber }) : null;
 
+    // Without a phone there is no natural key, so every call used to mint a
+    // fresh user AND a fresh event. Anyone who refreshed, went back, or retried
+    // a failed payment left another shell behind: one couple accumulated seven
+    // events (four inside five minutes), and 55 of 94 users were temp_ records.
+    // The random suffix on the generated slug meant they never collided, so
+    // nothing ever surfaced it.
+    //
+    // Reuse the couple's own abandoned shell instead. Matching on names + date
+    // alone would be too loose — two different couples could share both — so it
+    // only ever recycles an event that is UNPAID and has NO photos, i.e. one
+    // that demonstrably nobody has used. A real event is never touched.
+    let reusedShell = false;
+    if (!user && data.partnerName1 && data.partnerName2 && data.weddingDate) {
+      const weddingDate = new Date(data.weddingDate);
+      const candidates = await User.find({
+        phoneNumber: /^temp_/,
+        partnerName1: data.partnerName1,
+        partnerName2: data.partnerName2,
+        weddingDate,
+      })
+        .sort({ createdAt: -1 })
+        .limit(10);
+
+      for (const candidate of candidates) {
+        const ev = await Event.findOne({ userId: candidate._id });
+        if (!ev) continue;
+        if (ev.isPaid || (ev.photoCount ?? 0) > 0) continue;
+        user = candidate;
+        reusedShell = true;
+        logger.info(`registerDirect: reusing abandoned shell ${ev.eventCode} for ${data.partnerName1} & ${data.partnerName2}`);
+        break;
+      }
+    }
+
     if (user) {
       const existingEvent = await Event.findOne({ userId: user._id });
-      if (existingEvent) {
+      // A recycled shell HAS an event — that is the point of recycling it — so
+      // this guard would otherwise reject the very case it was added to fix.
+      // It still applies to a real returning user, who should log in instead.
+      if (existingEvent && !reusedShell) {
         throw new ValidationError('User already registered. Please login instead.');
       }
       user = await User.findByIdAndUpdate(
