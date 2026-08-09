@@ -1237,7 +1237,15 @@ class AdminService {
       let pendingSinceLastUpdate = 0;
       const activeUploads: Promise<void>[] = [];
 
-      const processEntry = async (buffer: Buffer, fileName: string, ext: string, category: string | null) => {
+      const processEntry = async (
+        buffer: Buffer,
+        fileName: string,
+        ext: string,
+        category: string | null,
+        // The path inside the zip. s3Key is flattened, so this is the only
+        // record of which folder the photographer put the file in.
+        filePath: string
+      ) => {
         try {
           const cleanName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
           const photoS3Key = `events/${eventCode}/${nanoid()}-${cleanName}`;
@@ -1313,7 +1321,7 @@ class AdminService {
           await Promise.race(activeUploads);
         }
 
-        const promise = processEntry(buffer, fileName, ext, category).then(() => {
+        const promise = processEntry(buffer, fileName, ext, category, filePath).then(() => {
           activeUploads.splice(activeUploads.indexOf(promise), 1);
         });
         activeUploads.push(promise);
