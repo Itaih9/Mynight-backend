@@ -31,7 +31,7 @@ const DEFAULT_CAMPAIGNS: Partial<IEmailCampaign>[] = [
   { days: 30, minDays: 8 },
   { days: 7, minDays: 0 },
 ].map(({ days, minDays }) => ({
-  name: `Here I Am — ${days} ימים לפני החתונה`,
+  name: `My Night — ${days} ימים לפני החתונה`,
   audience: 'flash_free_unpaid' as const,
   filters: { requireEmail: true, minDaysToWedding: minDays },
   trigger: { type: 'before_wedding' as const, days },
@@ -43,14 +43,18 @@ const DEFAULT_CAMPAIGNS: Partial<IEmailCampaign>[] = [
     title: 'עוד {{daysToWedding}} ימים לחתונה שלכם',
     paragraphs: [
       'פלאש כבר מוכן — האורחים שלכם יצלמו, ואתם תקבלו את כל התמונות בבוקר שאחרי.',
-      'זה בדיוק מה ש-<strong>Here I Am</strong> מוסיף. אפשר לשדרג עד ליום החתונה.',
+      'זה בדיוק מה ש-<strong>My Night</strong> מוסיף. אפשר לשדרג עד ליום החתונה.',
     ],
     bullets: [
       'כל אורח מקבל אלבום אישי — רק עם התמונות שהוא בהן',
       'גם התמונות מהצלם המקצועי נכנסות לזיהוי הפנים',
       'סטורי מוכן כבר ביום שאחרי החתונה',
     ],
-    ctaText: 'שדרוג ל-Here I Am',
+    // Always "שדרוג ל-My Night" in post-פלאש copy. The package is called
+    // Here I Am / החכמה in the catalogue, but a free פלאש couple has never seen
+    // that name — to them the upgrade is to My Night, and naming a product they
+    // do not recognise reads as a different company asking for money.
+    ctaText: 'שדרוג ל-My Night',
     ctaUrl: `${env.FRONTEND_URL}/here-i-am`,
     footnote: 'לא מעוניינים? אפשר להתעלם — פלאש נשאר שלכם בחינם.',
   },
