@@ -74,6 +74,9 @@ class CouponController {
           maxUses: coupon.maxUses,
           usedCount: coupon.usedCount,
           isActive: coupon.isActive,
+          // The guest popup prints this, so the gift card states its own
+          // deadline rather than the customer discovering it at checkout.
+          expiresAt: coupon.expiresAt,
         },
       });
     } catch (error) {

@@ -82,7 +82,9 @@ class CouponService {
     }
 
     if (coupon.expiresAt && coupon.expiresAt < new Date()) {
-      return { valid: false, message: 'Coupon has expired' };
+      // Hebrew: a guest redeeming a gift card sees this, and every other
+      // message on this path is already Hebrew.
+      return { valid: false, message: 'תוקף הקופון פג' };
     }
 
     if (coupon.maxUses > 0 && coupon.usedCount >= coupon.maxUses) {
@@ -213,6 +215,27 @@ class CouponService {
       : { discountPercent: defaults.discountValue, discountAmount: 0 };
   }
 
+  /** Event gift cards run for 30 days — counted from the WEDDING, not from now. */
+  static readonly EVENT_COUPON_DAYS = 30;
+
+  /**
+   * When an event's gift card stops working.
+   *
+   * Anchored to the wedding date, deliberately. The coupon is created the
+   * moment a couple signs up, but no guest sees it until after the wedding —
+   * so counting 30 days from creation would hand out gift cards that expired
+   * months before anyone could reach them. Counting from the wedding gives
+   * every guest the same 30 days no matter when the couple booked.
+   *
+   * Falls back to 30 days from now only when the event has no wedding date.
+   */
+  private async eventCouponExpiry(eventId: string): Promise<Date> {
+    const { Event } = await import('../events/events.model');
+    const event = await Event.findById(eventId).select('weddingDate').lean();
+    const anchor = event?.weddingDate ? new Date(event.weddingDate) : new Date();
+    return new Date(anchor.getTime() + CouponService.EVENT_COUPON_DAYS * 24 * 60 * 60 * 1000);
+  }
+
   async getOrCreateEventCoupon(eventId: string): Promise<ICoupon> {
     const existing = await Coupon.findOne({ ownerEventId: eventId, type: 'event' });
     if (existing) return existing;
@@ -237,6 +260,7 @@ class CouponService {
       discountPercent: discount.discountPercent,
       discountAmount: discount.discountAmount,
       maxUses: defaults.maxUses,
+      expiresAt: await this.eventCouponExpiry(eventId),
       ownerEventId: eventId,
       type: 'event',
       isActive: true,
