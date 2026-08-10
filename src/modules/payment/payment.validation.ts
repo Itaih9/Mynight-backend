@@ -11,7 +11,9 @@ export const createPaymentIntentSchema = z.object({
 export const payWithCouponSchema = z.object({
   eventId: z.string(),
   couponCode: z.string(),
-  amount: z.number().positive(),
+  // Accepted for backwards compatibility with clients that still send it, but
+  // ignored — the server prices the event from its package.
+  amount: z.number().positive().optional(),
 });
 
 export const chargeSumitSchema = z.object({

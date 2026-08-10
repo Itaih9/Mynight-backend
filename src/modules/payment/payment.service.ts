@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { Payment, IPayment } from './payment.model';
-import { Event } from '../events/events.model';
+import { Event, IEvent } from '../events/events.model';
 import { User } from '../auth/user.model';
 import { Referral, COMMISSION_RATE } from '../affiliate/referral.model';
 import { Affiliate } from '../affiliate/affiliate.model';
@@ -76,11 +76,41 @@ interface SumitChargeResult {
 }
 
 class PaymentService {
+  /**
+   * What this event costs, decided from the event and the product — never from
+   * the request body. Any `amount` a client sends is a suggestion at best: the
+   * browser controls it, so trusting it means the buyer sets the price.
+   */
+  private async resolveAuthoritativeAmount(event: IEvent, product?: string): Promise<number> {
+    if (product === 'flash_plus') {
+      if (event.flashTier === 'plus') {
+        throw new ValidationError('האירוע כבר משודרג ל-פלאש+');
+      }
+      return FLASH_PLUS_PRICE_ILS;
+    }
+
+    if (event.isPaid) {
+      throw new ValidationError('Event is already paid');
+    }
+
+    // The event records which package it is; that is what decides the price.
+    const { Package } = await import('../packages/packages.model');
+    const pkg = await Package.findOne({
+      isActive: true,
+      $or: [{ title: event.packageName }, { englishTitle: event.packageName }],
+    });
+    if (!pkg) {
+      logger.error(`No active package matches event ${event.eventCode} packageName="${event.packageName}"`);
+      throw new ValidationError('לא נמצאה חבילה מתאימה לאירוע. פנו אלינו ונשלים את ההזמנה.');
+    }
+    return pkg.price;
+  }
+
   async payWithCoupon(
     userId: string,
     eventId: string,
     couponCode: string,
-    originalAmount: number
+    product?: string
   ): Promise<PayWithCouponResult> {
     const event = await Event.findById(eventId);
     if (!event) {
@@ -95,9 +125,21 @@ class PaymentService {
       throw new ValidationError('Event is already paid');
     }
 
+    // This route used to take the price from the request body, so
+    // {couponCode: "GIFT-...", amount: 200} against a ₪200 guest gift card
+    // zeroed out and marked the event paid — a free My Night event.
+    const originalAmount = await this.resolveAuthoritativeAmount(event, product);
+
     const couponResult = await couponService.validate(couponCode, event.packageName);
     if (!couponResult.valid) {
       throw new ValidationError(couponResult.message);
+    }
+
+    // Guest gift cards are advertised "למימוש לאלבום המושלם". A ₪200 card
+    // against a ₪50 פלאש+ upgrade would cover it entirely, and a fully-covered
+    // payment grants the event — so keep them to album purchases.
+    if (product === 'flash_plus' && couponResult.coupon?.type === 'event') {
+      throw new ValidationError('גיפט קארד של אורחים ניתן למימוש ברכישת אלבום My Night בלבד');
     }
 
     const discountPercent = couponResult.discountPercent ?? 0;
@@ -128,15 +170,17 @@ class PaymentService {
         },
       });
 
+      // A פלאש+ upgrade buys the flash tier, not the whole event — only a
+      // package purchase marks it paid.
       await Event.findByIdAndUpdate(eventId, {
-        isPaid: true,
+        ...(product === 'flash_plus' ? {} : { isPaid: true }),
         paymentId: payment._id,
         flashTier: 'plus',
       });
 
       await this.processAffiliateCommission(payment);
 
-      logger.info(`Payment completed with 100% coupon: ${couponCode} for event ${eventId}`);
+      logger.warn(`Payment completed with full-cover coupon ${couponCode} for event ${event.eventCode}: ₪${originalAmount} covered`);
 
       await notifyAdminOfPayment(payment);
 
@@ -169,36 +213,14 @@ class PaymentService {
       throw new ValidationError('Unauthorized to pay for this event');
     }
 
-    // Flash Plus (פלאש+) upgrade: price is server-authoritative (never trust the
-    // client amount), and it's allowed on an unpaid free-flash event.
-    if (product === 'flash_plus') {
-      if (event.flashTier === 'plus') {
-        throw new ValidationError('האירוע כבר משודרג ל-פלאש+');
-      }
-      amount = FLASH_PLUS_PRICE_ILS;
-    } else if (event.isPaid) {
-      throw new ValidationError('Event is already paid');
-    } else {
-      // Package price is server-authoritative too, for the same reason פלאש+ is.
-      // `amount` arrives in the request body and was previously charged
-      // verbatim, so /register?price=1 — the price is a URL parameter the
-      // browser controls — bought a 675 package for one shekel.
-      //
-      // The event records which package it is; that is what decides the price.
-      const { Package } = await import('../packages/packages.model');
-      const pkg = await Package.findOne({
-        isActive: true,
-        $or: [{ title: event.packageName }, { englishTitle: event.packageName }],
-      });
-      if (!pkg) {
-        logger.error(`No active package matches event ${event.eventCode} packageName="${event.packageName}"`);
-        throw new ValidationError('לא נמצאה חבילה מתאימה לאירוע. פנו אלינו ונשלים את ההזמנה.');
-      }
-      if (amount !== pkg.price) {
-        logger.warn(`Payment amount ${amount} did not match package "${pkg.englishTitle}" price ${pkg.price} for event ${event.eventCode} — using the package price`);
-      }
-      amount = pkg.price;
+    // `amount` arrives in the request body and was once charged verbatim, so
+    // /register?price=1 — the price is a URL parameter the browser controls —
+    // bought a ₪675 package for one shekel. The server decides the price.
+    const authoritativeAmount = await this.resolveAuthoritativeAmount(event, product);
+    if (amount !== authoritativeAmount) {
+      logger.warn(`Payment amount ${amount} did not match the server price ${authoritativeAmount} for event ${event.eventCode} — charging the server price`);
     }
+    amount = authoritativeAmount;
 
     if (!amount || amount <= 0) {
       throw new ValidationError('סכום התשלום חסר');
@@ -224,7 +246,7 @@ class PaymentService {
         logger.info(`[COUPON-DEBUG] code=${couponCode} valid=${couponResult.valid} pct=${couponResult.discountPercent} fixed=${couponResult.discountAmount} amount=${amount} discount=${discountAmount} final=${finalAmount}`);
 
         if (finalAmount <= 0) {
-          const result = await this.payWithCoupon(userId, eventId, couponCode, amount);
+          const result = await this.payWithCoupon(userId, eventId, couponCode, product);
           return {
             success: result.success,
             message: result.message,

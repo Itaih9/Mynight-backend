@@ -5,12 +5,13 @@ import { AuthRequest } from '@/shared/middleware/auth.middleware';
 export class PaymentController {
   async payWithCoupon(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { eventId, couponCode, amount } = req.body;
+      // `amount` may still arrive in the body from older clients; it is
+      // deliberately not forwarded — the service prices the event itself.
+      const { eventId, couponCode } = req.body;
       const result = await paymentService.payWithCoupon(
         req.userId!,
         eventId,
-        couponCode,
-        amount
+        couponCode
       );
       res.json({
         success: true,
