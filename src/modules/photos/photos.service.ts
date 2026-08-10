@@ -118,11 +118,56 @@ export function normalizeCategory(raw?: string | null): string | null {
  * per batch, and the actual sections (חופה, ריקודים) never surfaced at all.
  * The deepest folder is the one the photographer named for its contents.
  */
+/**
+ * The only folder names that become a gallery category.
+ *
+ * A photographer's delivery is full of folders that mean nothing to a guest —
+ * "arielandgal photo download 10of", "RAW", "edited v2". Deriving a category
+ * from whichever folder happened to be there filled the gallery filter with one
+ * useless entry per delivery batch and buried the sections people actually
+ * want. An allow-list is the only rule that holds: anything not named here is
+ * simply not a category, and those photos stay unfiltered.
+ */
+export const PHOTO_CATEGORIES = [
+  'משפחה',
+  'ריקודים',
+  'חופה',
+  'קבלת פנים',
+  'אוכל',
+  'התארגנות',
+  'כתובה',
+  'כיסא כלה',
+  'מגנטים',
+] as const;
+
+/**
+ * Map a folder name onto a category, or null.
+ *
+ * CONTAINS, not equals. Photographers rarely name a folder exactly — real
+ * deliveries contained "צילומי משפחה" and "עיצוב וקבלת פנים", which an
+ * exact-match rule threw away even though they are plainly the family and
+ * reception sections. Containment keeps those and still rejects
+ * "arielandgal photo download 10of", which matches nothing.
+ *
+ * Longest first, so a category that contains another as a substring can never
+ * be shadowed by the shorter one.
+ */
+const CATEGORIES_BY_LENGTH = [...PHOTO_CATEGORIES].sort((a, b) => b.length - a.length);
+
+export function allowedCategory(raw?: string | null): string | null {
+  const cleaned = normalizeCategory(raw);
+  if (!cleaned) return null;
+  return CATEGORIES_BY_LENGTH.find((c) => cleaned.includes(c)) || null;
+}
+
 export function categoryFromPath(path?: string | null): string | null {
   if (!path) return null;
   const segments = path.replace(/\\/g, '/').split('/').filter(Boolean);
   if (segments.length < 2) return null;
-  return normalizeCategory(segments[segments.length - 2]);
+  // The folder the file actually sits in — a photographer wraps the real
+  // sections inside a per-batch delivery folder, so the top-level segment is
+  // the batch, not the content.
+  return allowedCategory(segments[segments.length - 2]);
 }
 
 export interface ShowcaseFace {
