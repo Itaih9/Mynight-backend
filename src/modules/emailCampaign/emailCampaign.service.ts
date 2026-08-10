@@ -55,7 +55,10 @@ const DEFAULT_CAMPAIGNS: Partial<IEmailCampaign>[] = [
     // that name — to them the upgrade is to My Night, and naming a product they
     // do not recognise reads as a different company asking for money.
     ctaText: 'שדרוג ל-My Night',
-    ctaUrl: `${env.FRONTEND_URL}/here-i-am`,
+    // Straight to checkout, not the /here-i-am lead form: a couple who clicked
+    // "שדרוג ל-My Night" has decided, and should not be asked to request a call
+    // back on a page named after a product they have never heard of.
+    ctaUrl: `${env.FRONTEND_URL}/register?package=Here%20I%20Am`,
     footnote: 'לא מעוניינים? אפשר להתעלם — פלאש נשאר שלכם בחינם.',
   },
   isActive: true,

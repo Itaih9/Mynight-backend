@@ -178,6 +178,26 @@ class PaymentService {
       amount = FLASH_PLUS_PRICE_ILS;
     } else if (event.isPaid) {
       throw new ValidationError('Event is already paid');
+    } else {
+      // Package price is server-authoritative too, for the same reason פלאש+ is.
+      // `amount` arrives in the request body and was previously charged
+      // verbatim, so /register?price=1 — the price is a URL parameter the
+      // browser controls — bought a 675 package for one shekel.
+      //
+      // The event records which package it is; that is what decides the price.
+      const { Package } = await import('../packages/packages.model');
+      const pkg = await Package.findOne({
+        isActive: true,
+        $or: [{ title: event.packageName }, { englishTitle: event.packageName }],
+      });
+      if (!pkg) {
+        logger.error(`No active package matches event ${event.eventCode} packageName="${event.packageName}"`);
+        throw new ValidationError('לא נמצאה חבילה מתאימה לאירוע. פנו אלינו ונשלים את ההזמנה.');
+      }
+      if (amount !== pkg.price) {
+        logger.warn(`Payment amount ${amount} did not match package "${pkg.englishTitle}" price ${pkg.price} for event ${event.eventCode} — using the package price`);
+      }
+      amount = pkg.price;
     }
 
     if (!amount || amount <= 0) {

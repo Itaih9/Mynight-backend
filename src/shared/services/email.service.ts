@@ -31,6 +31,19 @@ interface SendEmailParams {
   attachments?: EmailAttachment[];
 }
 
+/**
+ * Where an upsell CTA sends a couple: straight into checkout for the החכמה
+ * package, not the /here-i-am page. That page asks for contact details, and a
+ * couple who has just clicked "שדרוג ל-My Night" has already decided — making
+ * them request a call back loses them. It is also titled "Here I Am", a product
+ * name they have never seen, right after an email that said My Night.
+ *
+ * No ?price: the server charges the package's own price, and the checkout page
+ * reads it from /api/packages, so a link in an old email can never quote a
+ * stale figure.
+ */
+const UPGRADE_CHECKOUT_URL = () => `${env.FRONTEND_URL}/register?package=Here%20I%20Am`;
+
 const SENDGRID_ENABLED = Boolean(env.SENDGRID_API_KEY && env.SENDGRID_FROM_EMAIL);
 const BREVO_ENABLED = Boolean(env.BREVO_API_KEY);
 
@@ -439,7 +452,7 @@ class EmailService {
         <p style="margin:0 0 8px 0;font-size:11px;font-weight:700;letter-spacing:2px;color:${BRAND.accentDark};">החבילה החכמה של My Night</p>
         <p style="margin:0 0 10px 0;font-family:${BRAND.serif};font-size:22px;font-weight:400;line-height:1.25;color:${BRAND.primary};">רוצים שכל אורח יקבל את התמונות שלו?</p>
         <p style="margin:0 0 14px 0;font-size:14px;line-height:1.8;color:${BRAND.text};text-align:right;">פלאש קורה בחתונה שלכם. <strong>My Night</strong> מתחיל לעבוד בבוקר אחרי, ומרכיב לכל אחד את האלבום שלו, בזיהוי חכם. כל אורח מקבל רק את התמונות שהוא מופיע בהן. ואתם מקבלים את כל החתונה במקום אחד, בלי לחפש ובלי לתייג. זיכרון מושלם, אפס מאמץ.</p>
-        ${button(`${env.FRONTEND_URL}/here-i-am`, 'שדרוג ל-My Night')}
+        ${button(UPGRADE_CHECKOUT_URL(), 'שדרוג ל-My Night')}
       </div>
       <p style="margin:24px 0 0 0;font-size:14px;color:${BRAND.muted};">יש שאלה? פשוט השיבו למייל הזה.</p>
     `;
@@ -479,7 +492,7 @@ class EmailService {
         </ul>
       </div>
       <p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:${BRAND.text};">פלאש קורה בחתונה שלכם. <strong>My Night</strong> מתחיל לעבוד בבוקר אחרי. אפשר לשדרג עד ליום החתונה.</p>
-      ${button(`${env.FRONTEND_URL}/here-i-am`, 'שדרוג ל-My Night')}
+      ${button(UPGRADE_CHECKOUT_URL(), 'שדרוג ל-My Night')}
       <p style="margin:24px 0 0 0;font-size:13px;color:${BRAND.muted};">לא מעוניינים? אפשר להתעלם — פלאש נשאר שלכם בחינם.</p>
     `;
     await this.sendEmail({
