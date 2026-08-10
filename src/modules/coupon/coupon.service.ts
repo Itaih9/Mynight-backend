@@ -215,30 +215,29 @@ class CouponService {
       : { discountPercent: defaults.discountValue, discountAmount: 0 };
   }
 
-  /** Event gift cards run for 30 days — counted from the WEDDING, not from now. */
+  /** Event gift cards run for 30 days, starting when someone first opens one. */
   static readonly EVENT_COUPON_DAYS = 30;
-
-  /**
-   * When an event's gift card stops working.
-   *
-   * Anchored to the wedding date, deliberately. The coupon is created the
-   * moment a couple signs up, but no guest sees it until after the wedding —
-   * so counting 30 days from creation would hand out gift cards that expired
-   * months before anyone could reach them. Counting from the wedding gives
-   * every guest the same 30 days no matter when the couple booked.
-   *
-   * Falls back to 30 days from now only when the event has no wedding date.
-   */
-  private async eventCouponExpiry(eventId: string): Promise<Date> {
-    const { Event } = await import('../events/events.model');
-    const event = await Event.findById(eventId).select('weddingDate').lean();
-    const anchor = event?.weddingDate ? new Date(event.weddingDate) : new Date();
-    return new Date(anchor.getTime() + CouponService.EVENT_COUPON_DAYS * 24 * 60 * 60 * 1000);
-  }
 
   async getOrCreateEventCoupon(eventId: string): Promise<ICoupon> {
     const existing = await Coupon.findOne({ ownerEventId: eventId, type: 'event' });
-    if (existing) return existing;
+    if (existing) {
+      // The 30 days start when the card is first opened, not when it was made.
+      // These are minted at signup but nobody sees one until after the wedding,
+      // so an expiry set at creation would already have passed — a couple
+      // booking in August for a December wedding would hand out gift cards that
+      // died in September. Starting the clock on first read means the guest who
+      // opens it always has the full window in front of them.
+      //
+      // One shared code means one clock: whoever opens it first starts it for
+      // everyone. Guests all get the album at the same time, so in practice
+      // they are within days of each other.
+      if (!existing.expiresAt) {
+        existing.expiresAt = new Date(Date.now() + CouponService.EVENT_COUPON_DAYS * 86400000);
+        await existing.save();
+        logger.info(`Event coupon ${existing.code} clock started, expires ${existing.expiresAt.toISOString()}`);
+      }
+      return existing;
+    }
 
     const defaults = await this.getEventDefaults();
 
@@ -260,7 +259,7 @@ class CouponService {
       discountPercent: discount.discountPercent,
       discountAmount: discount.discountAmount,
       maxUses: defaults.maxUses,
-      expiresAt: await this.eventCouponExpiry(eventId),
+      // No expiry at creation on purpose — see the clock-start note below.
       ownerEventId: eventId,
       type: 'event',
       isActive: true,
