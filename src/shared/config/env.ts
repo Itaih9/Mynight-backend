@@ -33,6 +33,20 @@ interface EnvConfig {
    * WhatsApp OTP fallback stays off.
    */
   WATI_OTP_TEMPLATE?: string;
+  /**
+   * Shared secret for the Wati webhook. Wati does not sign its callbacks, so the
+   * only thing standing between the endpoint and the open internet is a secret
+   * we put in the URL we hand Wati: .../api/whatsapp/webhook?token=<secret>.
+   * Unset means the endpoint accepts anything — tolerable locally, not in
+   * production, where anyone could then forge delivery stats.
+   */
+  WATI_WEBHOOK_SECRET?: string;
+  /**
+   * Public origin of THIS server, e.g. https://api.mynight.co.il. Campaign CTA
+   * links are rewritten through it so clicks can be counted. Unset means links
+   * go out untracked — they still work, they just point straight at the site.
+   */
+  PUBLIC_API_URL?: string;
   SENDGRID_FROM_EMAIL?: string;
   SENDGRID_FROM_NAME?: string;
   /**
@@ -85,6 +99,8 @@ export const env: EnvConfig = {
   WATI_API_ENDPOINT: process.env.WATI_API_ENDPOINT,
   WATI_ACCESS_TOKEN: process.env.WATI_ACCESS_TOKEN,
   WATI_OTP_TEMPLATE: process.env.WATI_OTP_TEMPLATE,
+  WATI_WEBHOOK_SECRET: process.env.WATI_WEBHOOK_SECRET,
+  PUBLIC_API_URL: process.env.PUBLIC_API_URL,
   SENDGRID_FROM_EMAIL: process.env.SENDGRID_FROM_EMAIL,
   SENDGRID_FROM_NAME: process.env.SENDGRID_FROM_NAME,
   BREVO_API_KEY: process.env.BREVO_API_KEY,

@@ -4,8 +4,20 @@ import { User } from '../auth/user.model';
 import { env } from '@/shared/config/env';
 import { NotFoundError } from '@/shared/utils/errors';
 import logger from '@/shared/utils/logger';
+import { sanitizePhoneNumber } from '@/shared/utils/helpers';
+import { clickUrl, signClickToken, trackingBase, withSource, TrackedChannel } from './campaignTracking';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The CTA as it goes out on one channel, for one recipient: `url` is what the
+ * link points at (our redirect when tracking is on), `code` is the bare token
+ * for a Wati URL-button, whose dynamic part is a suffix rather than a whole URL.
+ */
+interface CtaLink {
+  url: string;
+  code: string;
+}
 
 /** Recipient resolved from an audience query, ready to mail. */
 interface Recipient {
@@ -224,25 +236,55 @@ class EmailCampaignService {
     return out;
   }
 
-  /** Replace {{tokens}} with this recipient's values. */
-  private fill(text: string | undefined, r: Recipient): string {
+  /**
+   * Replace {{tokens}} with this recipient's values. `link` is supplied on the
+   * send path, where the CTA is known; without it {{ctaUrl}} and {{ctaCode}}
+   * resolve to empty rather than leaking the raw token text into a message.
+   */
+  private fill(text: string | undefined, r: Recipient, link?: CtaLink): string {
     if (!text) return '';
     return text
       .replace(/\{\{coupleName\}\}/g, r.coupleName)
       .replace(/\{\{daysToWedding\}\}/g, String(r.daysToWedding ?? ''))
       .replace(/\{\{eventCode\}\}/g, r.eventCode)
-      .replace(/\{\{cameraUrl\}\}/g, `${env.FRONTEND_URL}/camera/${r.eventCode}`);
+      .replace(/\{\{cameraUrl\}\}/g, `${env.FRONTEND_URL}/camera/${r.eventCode}`)
+      .replace(/\{\{ctaUrl\}\}/g, link?.url || '')
+      .replace(/\{\{ctaCode\}\}/g, link?.code || '');
   }
 
-  private fillBlocks(blocks: ICampaignBlocks, r: Recipient): ICampaignBlocks {
+  private fillBlocks(blocks: ICampaignBlocks, r: Recipient, link?: CtaLink): ICampaignBlocks {
     return {
-      title: this.fill(blocks.title, r),
-      paragraphs: (blocks.paragraphs || []).map((p) => this.fill(p, r)),
-      bullets: (blocks.bullets || []).map((b) => this.fill(b, r)),
-      ctaText: this.fill(blocks.ctaText, r),
-      ctaUrl: this.fill(blocks.ctaUrl, r),
-      footnote: this.fill(blocks.footnote, r),
+      title: this.fill(blocks.title, r, link),
+      paragraphs: (blocks.paragraphs || []).map((p) => this.fill(p, r, link)),
+      bullets: (blocks.bullets || []).map((b) => this.fill(b, r, link)),
+      ctaText: this.fill(blocks.ctaText, r, link),
+      // The button is the whole point of the mail, so it gets the tracked URL
+      // whenever there is one.
+      ctaUrl: link?.url || this.fill(blocks.ctaUrl, r),
+      footnote: this.fill(blocks.footnote, r, link),
     };
+  }
+
+  /**
+   * Build the CTA for one recipient on one channel. Falls back to the plain URL
+   * whenever tracking can't be honoured — a campaign with tracking on must never
+   * ship a broken link because PUBLIC_API_URL is unset or the ids aren't real.
+   */
+  private ctaFor(
+    campaign: IEmailCampaign,
+    r: Recipient,
+    channel: TrackedChannel
+  ): CtaLink {
+    const plain = this.fill(campaign.blocks?.ctaUrl, r);
+    if (campaign.trackClicks === false) return { url: plain, code: '' };
+
+    const token = signClickToken(String(campaign._id), r.eventId, channel);
+    if (!token) return { url: plain, code: '' };
+    if (!trackingBase()) {
+      logger.warn('PUBLIC_API_URL is not set — campaign links go out untracked');
+      return { url: plain, code: '' };
+    }
+    return { url: clickUrl(token), code: token };
   }
 
   // ---- Engine --------------------------------------------------------------
@@ -292,9 +334,14 @@ class EmailCampaignService {
             await emailService.sendCampaignEmail({
               to: r.email,
               subject: this.fill(campaign.subject, r),
-              blocks: this.fillBlocks(campaign.blocks, r),
+              blocks: this.fillBlocks(campaign.blocks, r, this.ctaFor(campaign, r, 'email')),
             });
           }
+
+          // Only set once WhatsApp actually went out, so the log doesn't claim a
+          // delivery channel it never used — and webhook events aren't matched
+          // against a couple we never messaged.
+          let wa: { templateName: string; messageId?: string } | undefined;
 
           if (channel === 'whatsapp' || channel === 'both') {
             const tpl = campaign.whatsapp?.templateName;
@@ -305,15 +352,17 @@ class EmailCampaignService {
               if (channel === 'whatsapp') throw new Error('Recipient has no phone number');
               logger.warn(`No phone for ${r.coupleName}; WhatsApp skipped`);
             } else {
-              await whatsappService.sendTemplate({
+              const cta = this.ctaFor(campaign, r, 'whatsapp');
+              const result = await whatsappService.sendTemplate({
                 to: r.phone,
                 templateName: tpl,
                 broadcastName: campaign.name,
                 parameters: (campaign.whatsapp?.parameters || []).map((p) => ({
                   name: p.name,
-                  value: this.fill(p.value, r),
+                  value: this.fill(p.value, r, cta),
                 })),
               });
+              wa = { templateName: tpl, messageId: result.messageId };
             }
           }
           // Log first-class: the unique index is what stops a double send.
@@ -321,6 +370,9 @@ class EmailCampaignService {
             campaignId: campaign._id,
             eventId: r.eventId,
             email: r.email,
+            channel,
+            phone: wa ? sanitizePhoneNumber(r.phone) : undefined,
+            whatsapp: wa ? { ...wa, status: 'sent' } : undefined,
           });
           await EmailCampaign.updateOne({ _id: campaign._id }, { $inc: { sentCount: 1 } });
           sent++;
@@ -342,7 +394,10 @@ class EmailCampaignService {
     if (!campaign) throw new NotFoundError('Campaign');
 
     const sample: Recipient = {
-      eventId: 'test',
+      // A syntactically valid id that matches no event: the tracked link is
+      // built and followable, so the button can be tested end to end, but the
+      // click lands on no send log and so never shows up in the numbers.
+      eventId: '0'.repeat(24),
       eventCode: 'TESTCODE',
       coupleName: 'דנה & יואב',
       email: to,
@@ -355,13 +410,14 @@ class EmailCampaignService {
       const tpl = campaign.whatsapp?.templateName;
       if (!tpl) throw new NotFoundError('WhatsApp template on this campaign');
       const { whatsappService } = await import('@/shared/services/whatsapp.service');
+      const cta = this.ctaFor(campaign, sample, 'whatsapp');
       await whatsappService.sendTemplate({
         to,
         templateName: tpl,
         broadcastName: `TEST ${campaign.name}`,
         parameters: (campaign.whatsapp?.parameters || []).map((p) => ({
           name: p.name,
-          value: this.fill(p.value, sample),
+          value: this.fill(p.value, sample, cta),
         })),
       });
       return;
@@ -371,8 +427,91 @@ class EmailCampaignService {
     await emailService.sendCampaignEmail({
       to,
       subject: `[בדיקה] ${this.fill(campaign.subject, sample)}`,
-      blocks: this.fillBlocks(campaign.blocks, sample),
+      blocks: this.fillBlocks(campaign.blocks, sample, this.ctaFor(campaign, sample, 'email')),
     });
+  }
+
+  // ---- Tracking ------------------------------------------------------------
+  /**
+   * Where a click token should land. Rebuilt from the campaign and the event
+   * rather than baked into the link, so editing a campaign's CTA also fixes
+   * every link already sitting in someone's WhatsApp.
+   */
+  async destinationFor(campaignId: string, eventId: string, channel: TrackedChannel): Promise<string> {
+    try {
+      const campaign = await EmailCampaign.findById(campaignId).select('blocks').lean();
+      const raw = campaign?.blocks?.ctaUrl;
+      if (!raw) return env.FRONTEND_URL;
+
+      const event = await Event.findById(eventId).select('eventCode name weddingDate').lean();
+      const sample: Recipient = {
+        eventId,
+        eventCode: event?.eventCode || '',
+        coupleName: event?.name || '',
+        email: '',
+        phone: '',
+        daysToWedding: event?.weddingDate
+          ? Math.ceil((new Date(event.weddingDate).getTime() - Date.now()) / DAY_MS)
+          : null,
+        daysSinceSignup: 0,
+      };
+
+      return withSource(this.fill(raw, sample), channel, campaignId) || env.FRONTEND_URL;
+    } catch (err) {
+      logger.error(`Click destination lookup failed for campaign ${campaignId}: ${(err as Error).message}`);
+      return env.FRONTEND_URL;
+    }
+  }
+
+  /**
+   * Count a click. No upsert: a token whose send log is gone (campaign deleted,
+   * test link) is a redirect we still honour but must not invent a row for.
+   */
+  async recordClick(campaignId: string, eventId: string): Promise<void> {
+    const now = new Date();
+    await EmailSendLog.updateOne(
+      { campaignId, eventId },
+      // $min on a missing field sets it, so firstClickAt survives out-of-order
+      // writes without a read first.
+      { $inc: { clicks: 1 }, $min: { firstClickAt: now }, $max: { lastClickAt: now } }
+    );
+  }
+
+  /** Delivery and engagement for one campaign, counted from its send logs. */
+  async stats(campaignId: string) {
+    const logs = await EmailSendLog.find({ campaignId })
+      .select('channel whatsapp clicks')
+      .lean();
+
+    const whatsapp = { sent: 0, delivered: 0, read: 0, replied: 0, failed: 0 };
+    let emails = 0;
+    let clicks = 0;
+    let clickedRecipients = 0;
+
+    for (const log of logs) {
+      const ch = log.channel || 'email';
+      if (ch === 'email' || ch === 'both') emails++;
+      if (log.whatsapp?.templateName) {
+        whatsapp.sent++;
+        // Statuses are cumulative — something that was read was also delivered,
+        // even if we never saw the delivered callback.
+        if (log.whatsapp.failedAt) whatsapp.failed++;
+        if (log.whatsapp.deliveredAt || log.whatsapp.readAt || log.whatsapp.repliedAt) whatsapp.delivered++;
+        if (log.whatsapp.readAt || log.whatsapp.repliedAt) whatsapp.read++;
+        if (log.whatsapp.repliedAt) whatsapp.replied++;
+      }
+      if (log.clicks) {
+        clicks += log.clicks;
+        clickedRecipients++;
+      }
+    }
+
+    return {
+      recipients: logs.length,
+      emails,
+      whatsapp,
+      clicks: { total: clicks, recipients: clickedRecipients },
+    };
   }
 
   /** Timer. Idempotency lives in EmailSendLog, so restarts are harmless. */

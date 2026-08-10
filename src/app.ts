@@ -17,6 +17,8 @@ import guestsRoutes from './modules/guests/guests.routes';
 import reviewRoutes from './modules/review/review.routes';
 import packagesRoutes from './modules/packages/packages.routes';
 import clientLogRoutes from './modules/clientLog/clientLog.routes';
+import whatsappRoutes from './modules/whatsapp/whatsapp.routes';
+import campaignTrackingRoutes from './modules/emailCampaign/campaignTracking.routes';
 
 export const createApp = (): Application => {
   const app = express();
@@ -66,6 +68,11 @@ export const createApp = (): Application => {
   app.use('/api/reviews', reviewRoutes);
   app.use('/api/packages', packagesRoutes);
   app.use('/api/client-log', clientLogRoutes);
+  app.use('/api/whatsapp', whatsappRoutes);
+
+  // Campaign click counter. Deliberately outside /api: short links, and no rate
+  // limiter between a couple and the page we asked them to open.
+  app.use('/t', campaignTrackingRoutes);
 
   app.use((_req: Request, res: Response) => {
     res.status(404).json({

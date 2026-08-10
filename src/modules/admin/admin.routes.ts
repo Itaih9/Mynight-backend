@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { adminController } from './admin.controller';
 import { emailCampaignController } from '../emailCampaign/emailCampaign.controller';
+import { whatsappController } from '../whatsapp/whatsapp.controller';
 import { adminProtect, blockServiceToken, requireServiceOwnedEvent } from './admin.middleware';
 import { loginBruteForceLimiter } from '@/shared/middleware/rateLimit.middleware';
 import multer from 'multer';
@@ -62,6 +63,9 @@ router.patch('/campaigns/:id', adminProtect, emailCampaignController.update);
 router.delete('/campaigns/:id', adminProtect, emailCampaignController.remove);
 router.post('/campaigns/:id/test', adminProtect, emailCampaignController.sendTest);
 router.get('/campaigns/:id/history', adminProtect, emailCampaignController.history);
+router.get('/campaigns/:id/stats', adminProtect, emailCampaignController.stats);
+// Raw Wati traffic — includes OTP messages and replies that belong to no campaign.
+router.get('/whatsapp/events', adminProtect, whatsappController.events);
 // The service token creates flash events here so they're stamped as its own
 // (and therefore deletable by it); a human admin may use it too.
 router.post('/events/flash', adminProtect, adminController.createFlashEvent);

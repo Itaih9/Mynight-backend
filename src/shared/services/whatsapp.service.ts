@@ -25,12 +25,29 @@ class WhatsAppService {
     return (phone || '').replace(/\D/g, '');
   }
 
+  /**
+   * Returns the Wati/Meta message id when the response carries one — it's the
+   * only reliable key for matching a later delivery webhook back to this send.
+   * Wati's response shape varies by tenant and API version, so an absent id is
+   * normal and callers fall back to matching on the phone number.
+   */
+  private messageIdOf(data: any): string | undefined {
+    const id =
+      data?.whatsappMessageId ||
+      data?.message?.whatsappMessageId ||
+      data?.message?.id ||
+      data?.messageId ||
+      data?.data?.whatsappMessageId ||
+      data?.id;
+    return id ? String(id) : undefined;
+  }
+
   async sendTemplate(opts: {
     to: string;
     templateName: string;
     broadcastName?: string;
     parameters?: { name: string; value: string }[];
-  }): Promise<void> {
+  }): Promise<{ messageId?: string }> {
     if (!this.enabled) {
       throw new AppError('WhatsApp is not configured (WATI_API_ENDPOINT / WATI_ACCESS_TOKEN)', 500);
     }
@@ -66,6 +83,7 @@ class WhatsAppService {
         throw new Error(data.info || data.message || 'Wati rejected the message');
       }
       logger.info(`WhatsApp template "${opts.templateName}" sent to ${number}`);
+      return { messageId: this.messageIdOf(data) };
     } catch (error: any) {
       const detail = error?.response?.data?.info || error?.response?.data?.message || error.message;
       logger.error(`WhatsApp send failed to ${number}: ${detail}`);

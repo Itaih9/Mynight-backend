@@ -82,6 +82,13 @@ export class EmailCampaignController {
       res.json({ success: true, data: await emailCampaignService.history(req.params.id) });
     } catch (error) { next(error); }
   }
+
+  /** Delivery and click counts for one campaign. */
+  async stats(req: Request, res: Response, next: NextFunction) {
+    try {
+      res.json({ success: true, data: await emailCampaignService.stats(req.params.id) });
+    } catch (error) { next(error); }
+  }
 }
 
 export const emailCampaignController = new EmailCampaignController();

@@ -51,6 +51,12 @@ export interface IEmailCampaign extends Document {
     templateName?: string;
     parameters?: { name: string; value: string }[];
   };
+  /**
+   * Route the CTA through our own /t/<token> redirect so a click is counted
+   * server-side. WhatsApp reports delivery, never clicks, so without this a
+   * campaign's only measurable outcome is "we sent it".
+   */
+  trackClicks: boolean;
   isActive: boolean;
   sentCount: number;
   createdAt: Date;
@@ -95,6 +101,7 @@ const emailCampaignSchema = new Schema<IEmailCampaign>(
       templateName: { type: String },
       parameters: [{ name: String, value: String }],
     },
+    trackClicks: { type: Boolean, default: true },
     isActive: { type: Boolean, default: true },
     sentCount: { type: Number, default: 0 },
   },
@@ -109,21 +116,66 @@ export const EmailCampaign = mongoose.model<IEmailCampaign>('EmailCampaign', ema
  * couple twice for the same campaign — and it doubles as the audit trail of who
  * received what.
  */
+export type WhatsAppDeliveryStatus = 'sent' | 'delivered' | 'read' | 'replied' | 'failed';
+
 export interface IEmailSendLog extends Document {
   campaignId: mongoose.Types.ObjectId;
   eventId: mongoose.Types.ObjectId;
   email: string;
   sentAt: Date;
+  channel?: 'email' | 'whatsapp' | 'both';
+  /**
+   * Destination in the digits-only form Wati uses (972…). This is the join key
+   * for webhook events: Wati's callback identifies a contact by `waId` and knows
+   * nothing about our campaigns.
+   */
+  phone?: string;
+  whatsapp?: {
+    templateName?: string;
+    /** Wati/Meta message id, when the send response gives us one. */
+    messageId?: string;
+    status?: WhatsAppDeliveryStatus;
+    deliveredAt?: Date;
+    readAt?: Date;
+    repliedAt?: Date;
+    failedAt?: Date;
+    error?: string;
+  };
+  clicks: number;
+  firstClickAt?: Date;
+  lastClickAt?: Date;
 }
 
 const emailSendLogSchema = new Schema<IEmailSendLog>({
   campaignId: { type: Schema.Types.ObjectId, ref: 'EmailCampaign', required: true },
   eventId: { type: Schema.Types.ObjectId, ref: 'Event', required: true },
-  email: { type: String, required: true },
+  // Not required: a WhatsApp-only campaign can legitimately reach a couple we
+  // have no email address for, and failing the log after the message has gone
+  // out would leave the send unrecorded — and therefore repeatable.
+  email: { type: String, default: '' },
   sentAt: { type: Date, default: Date.now },
+  channel: { type: String, enum: ['email', 'whatsapp', 'both'] },
+  phone: { type: String },
+  whatsapp: {
+    templateName: { type: String },
+    messageId: { type: String },
+    status: { type: String, enum: ['sent', 'delivered', 'read', 'replied', 'failed'] },
+    deliveredAt: { type: Date },
+    readAt: { type: Date },
+    repliedAt: { type: Date },
+    failedAt: { type: Date },
+    error: { type: String },
+  },
+  clicks: { type: Number, default: 0 },
+  firstClickAt: { type: Date },
+  lastClickAt: { type: Date },
 });
 
 emailSendLogSchema.index({ campaignId: 1, eventId: 1 }, { unique: true });
 emailSendLogSchema.index({ sentAt: -1 });
+// Webhook matching: by message id when Wati gives us one, otherwise the most
+// recent WhatsApp send to that number.
+emailSendLogSchema.index({ 'whatsapp.messageId': 1 }, { sparse: true });
+emailSendLogSchema.index({ phone: 1, sentAt: -1 });
 
 export const EmailSendLog = mongoose.model<IEmailSendLog>('EmailSendLog', emailSendLogSchema);
