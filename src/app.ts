@@ -70,9 +70,11 @@ export const createApp = (): Application => {
   app.use('/api/client-log', clientLogRoutes);
   app.use('/api/whatsapp', whatsappRoutes);
 
-  // Campaign click counter. Deliberately outside /api: short links, and no rate
-  // limiter between a couple and the page we asked them to open.
-  app.use('/t', campaignTrackingRoutes);
+  // Campaign click counter. Under /api because that is the only prefix nginx
+  // proxies here — anything else is served the SPA, and the redirect would
+  // never run. The rate limiter is per client IP, so a broadcast being opened
+  // by a few hundred different phones doesn't come near it.
+  app.use('/api/t', campaignTrackingRoutes);
 
   app.use((_req: Request, res: Response) => {
     res.status(404).json({

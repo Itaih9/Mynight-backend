@@ -74,7 +74,7 @@ export const verifyClickToken = (
 /** Where our own redirect lives. Empty when PUBLIC_API_URL isn't configured. */
 export const trackingBase = (): string => (env.PUBLIC_API_URL || '').replace(/\/+$/, '');
 
-export const clickUrl = (token: string): string => `${trackingBase()}/t/${token}`;
+export const clickUrl = (token: string): string => `${trackingBase()}/api/t/${token}`;
 
 /**
  * Tag the destination so the click is also visible to whatever analytics the

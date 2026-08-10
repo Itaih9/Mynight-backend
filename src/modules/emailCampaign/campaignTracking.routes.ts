@@ -5,13 +5,7 @@ import { verifyClickToken, isPreviewFetch } from './campaignTracking';
 import { emailCampaignService } from './emailCampaign.service';
 
 /**
- * The click counter behind campaign CTAs: /t/<token> → count → 302.
- *
- * Mounted at the root rather than under /api, for two reasons. It has to be
- * short enough to sit in a WhatsApp bubble, and it must not share the /api rate
- * limiter — a burst of couples opening the same broadcast is exactly the traffic
- * that limiter exists to stop, and losing those redirects would break the link
- * for the people most interested in it.
+ * The click counter behind campaign CTAs: /api/t/<token> → count → 302.
  *
  * Every path ends in a redirect. A bad or expired token means someone is
  * standing in front of a link that doesn't work, and the site is a better answer
