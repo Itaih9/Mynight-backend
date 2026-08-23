@@ -66,6 +66,12 @@ class CouponService {
   }
 
   async validate(code: string, packageName?: string): Promise<ValidateCouponResult> {
+    // Public endpoint with no schema in front of it: a body without a code used
+    // to throw on toUpperCase and answer 500.
+    if (typeof code !== 'string' || !code.trim()) {
+      return { valid: false, message: 'Invalid coupon code' };
+    }
+
     const coupon = await Coupon.findOne({ code: code.toUpperCase() });
 
     if (!coupon) {

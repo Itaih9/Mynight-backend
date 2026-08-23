@@ -18,6 +18,21 @@ export const errorHandler = (
     });
   }
 
+  // A malformed id or a body missing required fields is the caller's mistake,
+  // not ours. These used to fall through to the 500 branch, which meant any
+  // client could turn a typo into an error-log line and a five-hundred — and it
+  // hid genuine faults among the noise.
+  const anyErr = err as Error & { name?: string; path?: string; errors?: Record<string, { message: string }> };
+  if (anyErr.name === 'CastError') {
+    logger.warn(`400 - malformed ${anyErr.path ?? 'id'} - ${req.originalUrl} - ${req.method}`);
+    return res.status(400).json({ success: false, error: 'Invalid identifier', statusCode: 400 });
+  }
+  if (anyErr.name === 'ValidationError' && anyErr.errors) {
+    const detail = Object.values(anyErr.errors).map((e) => e.message).join(', ');
+    logger.warn(`400 - ${detail} - ${req.originalUrl} - ${req.method}`);
+    return res.status(400).json({ success: false, error: detail, statusCode: 400 });
+  }
+
   logger.error(`500 - ${err.message} - ${req.originalUrl} - ${req.method} - ${req.ip}`);
   logger.error(err.stack);
 
