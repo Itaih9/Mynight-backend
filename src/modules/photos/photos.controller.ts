@@ -5,8 +5,14 @@ import { Photo } from './photos.model';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
 
-/** One zip is one guest's selection, not a whole gallery. */
-const MAX_ZIP_PHOTOS = 200;
+/**
+ * A ceiling on abuse, not on customers. "Download all" in the guest gallery
+ * sends every photo in that guest's album, and the largest live event holds
+ * 3,542 — a 200 cap would have broken the feature for exactly the weddings that
+ * paid the most. What this stops is the 10MB JSON body of ~380,000 ids that the
+ * endpoint accepted before.
+ */
+const MAX_ZIP_PHOTOS = 5000;
 
 export class PhotosController {
   async getPresignedUrl(req: AuthRequest, res: Response, next: NextFunction) {
