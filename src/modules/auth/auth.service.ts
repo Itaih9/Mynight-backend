@@ -8,7 +8,7 @@ import { couponService } from '../coupon/coupon.service';
 import { env } from '@/shared/config/env';
 import { AppError, NotFoundError, ValidationError } from '@/shared/utils/errors';
 import { whatsappService } from '@/shared/services/whatsapp.service';
-import { generateOTP, generateReferralCode, formatPhoneNumber, generateCustomSlug } from '@/shared/utils/helpers';
+import { generateOTP, generateReferralCode, formatPhoneNumber, generateCustomSlug, isValidEmail } from '@/shared/utils/helpers';
 import logger from '@/shared/utils/logger';
 import { emailService } from '@/shared/services/email.service';
 import bcrypt from 'bcryptjs';
@@ -508,9 +508,24 @@ class AuthService {
   }
 
   async setPassword(userId: string, data: SetPasswordRequest): Promise<IUser> {
-    const user = await User.findById(userId);
+    // `password` is select:false on the schema, so it has to be asked for by
+    // name — without this the check below reads undefined and waves everyone
+    // through, which is precisely the bug it exists to prevent.
+    const user = await User.findById(userId).select('+password');
     if (!user) {
       throw new NotFoundError('User');
+    }
+
+    // Setting the FIRST password is onboarding — the welcome modal collects a
+    // password, phone and email in one step and there is nothing to prove yet.
+    // Changing an existing one is a different act: it locks the previous owner
+    // out, and this route also rewrites the phone number the account is reached
+    // by, so it has to cost the current password.
+    if (user.password) {
+      const matches = data.currentPassword && (await bcrypt.compare(data.currentPassword, user.password));
+      if (!matches) {
+        throw new ValidationError('הסיסמה הנוכחית שגויה');
+      }
     }
 
     const hadEmailBefore = Boolean(user.email);
@@ -656,6 +671,13 @@ class AuthService {
   async loginByIdentifier(identifier: string): Promise<AuthResponse> {
     const id = (identifier || '').trim();
     const isEmail = id.includes('@');
+
+    // Nothing shorter than a whole number or a whole address can be a real
+    // identifier here, and anything shorter is someone probing for accounts.
+    // The route has no validate() schema, so this is where that is enforced.
+    if (isEmail ? !isValidEmail(id) : id.replace(/\D/g, '').length < 9) {
+      throw new NotFoundError('User');
+    }
     let user = isEmail
       ? await User.findOne({ email: id.toLowerCase() })
       : await User.findOne({ phoneNumber: { $in: israeliPhoneCandidates(id) } });
@@ -663,10 +685,15 @@ class AuthService {
     if (!user && !isEmail) {
       // Fallback: match any stored phone that ends with the 9-digit core, so
       // unusual stored formats still resolve (the core is unique per number).
+      //
+      // The core must be the WHOLE 9 digits. This regex used to be built from
+      // whatever digits arrived, unanchored — so an identifier of "7" matched
+      // any stored number ending in 7 and handed back that stranger's session.
+      // A partial suffix is not "an unusual format", it's an enumeration probe.
       let digits = id.replace(/\D/g, '');
       if (digits.startsWith('972')) digits = digits.slice(3);
       digits = digits.replace(/^0+/, '');
-      if (digits) {
+      if (/^\d{9}$/.test(digits)) {
         user = await User.findOne({ phoneNumber: new RegExp(`${digits}$`) });
       }
     }

@@ -151,8 +151,12 @@ class FacesService {
     const archive = archiver('zip', { zlib: { level: 5 } });
 
     archive.on('error', (err) => {
+      // See the twin in photos.service: throwing here escapes the try/catch,
+      // becomes an uncaughtException, and takes the whole process down.
       logger.error(`Archive error: ${err.message}`);
-      throw err;
+      archive.abort();
+      if (!res.headersSent) res.status(500).end();
+      else res.destroy();
     });
 
     archive.pipe(res);

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authController } from './auth.controller';
 import { validate } from '@/shared/middleware/validation.middleware';
-import { protect } from '@/shared/middleware/auth.middleware';
+import { protect, requireFullSession } from '@/shared/middleware/auth.middleware';
 import { authLimiter, otpRateLimiter, loginBruteForceLimiter } from '@/shared/middleware/rateLimit.middleware';
 import {
   loginSendOTPSchema,
@@ -29,7 +29,7 @@ router.post('/register/direct', authLimiter, validate(registerDirectSchema), aut
 router.post('/gallery-login', loginBruteForceLimiter, authLimiter, authController.galleryLogin);
 
 router.get('/profile', protect, authController.getProfile);
-router.put('/profile', protect, validate(updateProfileSchema), authController.updateProfile);
-router.put('/set-password', protect, validate(setPasswordSchema), authController.setPassword);
+router.put('/profile', protect, requireFullSession, validate(updateProfileSchema), authController.updateProfile);
+router.put('/set-password', protect, requireFullSession, validate(setPasswordSchema), authController.setPassword);
 
 export default router;

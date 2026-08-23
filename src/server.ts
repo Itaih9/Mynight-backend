@@ -15,7 +15,11 @@ const startServer = async () => {
 
     const PORT = env.PORT || 5000;
 
-    const server = app.listen(PORT, () => {
+    // Loopback only: nginx proxies to localhost, so nothing else needs to reach
+    // this port. Bound to 0.0.0.0 it was one security-group rule away from being
+    // public — and a direct caller can set their own X-Forwarded-For, which with
+    // `trust proxy` defeats every per-IP limit in the app, including the OTP ones.
+    const server = app.listen(PORT, '127.0.0.1', () => {
       logger.info(`Server running on port ${PORT} in ${env.NODE_ENV} mode`);
       logger.info(`Health check available at http://localhost:${PORT}/health`);
     });

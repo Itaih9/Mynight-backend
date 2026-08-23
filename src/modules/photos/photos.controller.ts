@@ -5,11 +5,14 @@ import { Photo } from './photos.model';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
 
+/** One zip is one guest's selection, not a whole gallery. */
+const MAX_ZIP_PHOTOS = 200;
+
 export class PhotosController {
   async getPresignedUrl(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { eventId, fileName, fileType } = req.body;
-      const result = await photosService.getPresignedUrl(eventId, fileName, fileType);
+      const result = await photosService.getPresignedUrl(eventId, fileName, fileType, req.userId);
       res.json({
         success: true,
         data: result,
@@ -22,7 +25,7 @@ export class PhotosController {
   async completeUpload(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { eventId, s3Key, metadata, path } = req.body;
-      const photo = await photosService.completeUpload(eventId, s3Key, metadata, path);
+      const photo = await photosService.completeUpload(eventId, s3Key, metadata, path, req.userId);
       res.status(201).json({
         success: true,
         data: photo,
@@ -200,6 +203,15 @@ export class PhotosController {
       const { photoIds } = req.body;
       if (!photoIds || !Array.isArray(photoIds) || photoIds.length === 0) {
         res.status(400).json({ success: false, error: 'Photo IDs are required' });
+        return;
+      }
+      // Uncapped, this took whatever fitted in a 10MB JSON body — roughly 380k
+      // ids — and streamed every matching object through this one process.
+      if (photoIds.length > MAX_ZIP_PHOTOS) {
+        res.status(400).json({
+          success: false,
+          error: `אפשר להוריד עד ${MAX_ZIP_PHOTOS} תמונות בבת אחת`,
+        });
         return;
       }
       await photosService.streamPhotosZip(photoIds, res);

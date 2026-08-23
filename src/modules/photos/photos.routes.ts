@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { photosController } from './photos.controller';
 import { validate } from '@/shared/middleware/validation.middleware';
 import { protect } from '@/shared/middleware/auth.middleware';
+import { uploadLimiter, facesLimiter } from '@/shared/middleware/rateLimit.middleware';
 import {
   getPresignedUrlSchema,
   completeUploadSchema,
@@ -31,11 +32,11 @@ router.post(
   photosController.completeUpload
 );
 
-router.post('/match', upload.single('selfie'), photosController.matchPhotos);
+router.post('/match', facesLimiter, upload.single('selfie'), photosController.matchPhotos);
 
-router.post('/guest-upload', upload.single('photo'), photosController.guestUpload);
-router.post('/guest-presigned-url', validate(guestPresignedUrlSchema), photosController.guestPresignedUrl);
-router.post('/guest-complete', validate(guestCompleteUploadSchema), photosController.guestCompleteUpload);
+router.post('/guest-upload', uploadLimiter, upload.single('photo'), photosController.guestUpload);
+router.post('/guest-presigned-url', uploadLimiter, validate(guestPresignedUrlSchema), photosController.guestPresignedUrl);
+router.post('/guest-complete', uploadLimiter, validate(guestCompleteUploadSchema), photosController.guestCompleteUpload);
 
 // Disposable camera (public — guests shoot via /camera/:code)
 router.get('/disposable/status', photosController.disposableStatus);
@@ -53,7 +54,7 @@ router.get('/download/:id', photosController.downloadPhoto);
 
 router.get('/download-url/:id', photosController.getDownloadUrl);
 
-router.post('/download-zip', photosController.downloadPhotosZip);
+router.post('/download-zip', facesLimiter, photosController.downloadPhotosZip);
 
 router.get('/showcase/images', photosController.getShowcaseImages);
 router.get('/showcase/faces/:faceId', photosController.getShowcaseFacePhotos);

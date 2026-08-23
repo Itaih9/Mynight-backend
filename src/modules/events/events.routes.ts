@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { eventsController } from './events.controller';
 import { validate } from '@/shared/middleware/validation.middleware';
-import { protect } from '@/shared/middleware/auth.middleware';
+import { protect, requireFullSession } from '@/shared/middleware/auth.middleware';
 import { flashSignupLimiter, flashSignupDailyLimiter } from '@/shared/middleware/rateLimit.middleware';
 import { createEventSchema, updateSharingPermissionsSchema, updateSlugSchema } from './events.validation';
 import multer from 'multer';
@@ -43,12 +43,12 @@ router.get('/code/:code/qr.png', eventsController.getEventQr);
 router.get('/slug/:slug', eventsController.getEventBySlug);
 router.get('/find/:identifier', eventsController.getEventByCodeOrSlug);
 router.get('/:id', protect, eventsController.getEvent);
-router.delete('/:id', protect, eventsController.deleteEvent);
-router.patch('/:id/slug', protect, validate(updateSlugSchema), eventsController.updateSlug);
-router.patch('/:id/sharing-permissions', protect, validate(updateSharingPermissionsSchema), eventsController.updateSharingPermissions);
+router.delete('/:id', protect, requireFullSession, eventsController.deleteEvent);
+router.patch('/:id/slug', protect, requireFullSession, validate(updateSlugSchema), eventsController.updateSlug);
+router.patch('/:id/sharing-permissions', protect, requireFullSession, validate(updateSharingPermissionsSchema), eventsController.updateSharingPermissions);
 
-router.post('/:id/guest-list-file', protect, upload.single('file'), eventsController.uploadGuestListFile);
-router.get('/:id/guest-list-file', protect, eventsController.getGuestListFile);
-router.delete('/:id/guest-list-file', protect, eventsController.deleteGuestListFile);
+router.post('/:id/guest-list-file', protect, requireFullSession, upload.single('file'), eventsController.uploadGuestListFile);
+router.get('/:id/guest-list-file', protect, requireFullSession, eventsController.getGuestListFile);
+router.delete('/:id/guest-list-file', protect, requireFullSession, eventsController.deleteGuestListFile);
 
 export default router;

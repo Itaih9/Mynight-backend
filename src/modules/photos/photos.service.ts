@@ -202,6 +202,24 @@ class PhotosService {
   private shuffledIdCache = new Map<string, { ids: string[]; total: number; expiresAt: number }>();
   private pendingVideoPosters = new Map<string, { posterUrl: string; expiresAt: number }>();
 
+  /**
+   * A completed upload may only register a key inside its own event's prefix.
+   *
+   * Every "complete" endpoint takes the s3Key from the client, because the
+   * browser uploaded straight to S3 with a presigned URL and we only learn the
+   * key afterwards. Nothing checked that the key was one we handed out, so any
+   * object in the bucket could be attached to any event — including another
+   * couple's photos, read back afterwards through this event's gallery.
+   */
+  private assertKeyBelongsToEvent(s3Key: string, eventCode: string): void {
+    const prefix = `events/${eventCode}/`;
+    // No '..', no absolute keys, no sibling-prefix tricks: it must sit under
+    // this event and nowhere else.
+    if (typeof s3Key !== 'string' || !s3Key.startsWith(prefix) || s3Key.includes('..')) {
+      throw new ValidationError('Upload key does not belong to this event');
+    }
+  }
+
   private rememberPendingVideoPoster(s3Key: string, posterKey: string): void {
     this.pendingVideoPosters.set(s3Key, {
       posterUrl: `${env.CLOUDFRONT_URL}/${posterKey}`,
@@ -262,8 +280,12 @@ class PhotosService {
     }
   }
 
-  async getPresignedUrl(eventId: string, fileName: string, fileType: string) {
-    const event = await Event.findById(eventId);
+  async getPresignedUrl(eventId: string, fileName: string, fileType: string, userId?: string) {
+    // Scoped to the owner: this used to be findById, so any logged-in customer
+    // could mint an upload URL into anyone else's event.
+    const event = userId
+      ? await Event.findOne({ _id: eventId, userId })
+      : await Event.findById(eventId);
     if (!event) {
       throw new NotFoundError('Event');
     }
@@ -291,12 +313,17 @@ class PhotosService {
     eventId: string,
     s3Key: string,
     metadata: { size: number; mimeType: string; width?: number; height?: number },
-    path?: string
+    path?: string,
+    userId?: string
   ): Promise<IPhoto> {
-    const event = await Event.findById(eventId);
+    const event = userId
+      ? await Event.findOne({ _id: eventId, userId })
+      : await Event.findById(eventId);
     if (!event) {
       throw new NotFoundError('Event');
     }
+
+    this.assertKeyBelongsToEvent(s3Key, event.eventCode);
 
     if (this.isUploadExpired(event)) {
       throw new ValidationError('Upload window has expired. Contact us to extend your event.');
@@ -701,6 +728,10 @@ class PhotosService {
   ): Promise<IPhoto> {
     const event = await this.findEventByCodeOrSlug(eventCodeOrSlug);
 
+    // Unauthenticated by design — guests have no account — so the key is the
+    // only thing standing between a public endpoint and the whole bucket.
+    this.assertKeyBelongsToEvent(s3Key, event.eventCode);
+
     await this.setUploadStartedIfFirst(event);
 
     const url = `${env.CLOUDFRONT_URL}/${s3Key}`;
@@ -979,8 +1010,15 @@ class PhotosService {
     const archive = archiver('zip', { zlib: { level: 5 } });
 
     archive.on('error', (err) => {
+      // Never throw from here. This runs inside an EventEmitter callback, so the
+      // enclosing try/catch cannot see it — it became an uncaughtException, and
+      // server.ts answers that by shutting the process down. One unauthenticated
+      // request naming a photo whose S3 object had gone took the API down for
+      // every wedding on the box. Abandon this one response instead.
       logger.error(`Archive error: ${err.message}`);
-      throw err;
+      archive.abort();
+      if (!res.headersSent) res.status(500).end();
+      else res.destroy();
     });
 
     archive.pipe(res);
@@ -994,6 +1032,14 @@ class PhotosService {
         Bucket: env.S3_BUCKET_NAME,
         Key: photo.s3Key,
       }).createReadStream();
+
+      // A stream archiver has not reached yet has no error listener of its own,
+      // so a missing S3 object or a socket timeout raises an unhandled 'error'
+      // and kills the process. Skip the file; the rest of the zip still ships.
+      s3Stream.on('error', (err) => {
+        logger.warn(`Zip: skipping ${photo.s3Key}: ${(err as Error).message}`);
+        s3Stream.destroy();
+      });
 
       archive.append(s3Stream, { name: filename });
     }

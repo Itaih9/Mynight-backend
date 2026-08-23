@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { paymentController } from './payment.controller';
 import { validate } from '@/shared/middleware/validation.middleware';
-import { protect } from '@/shared/middleware/auth.middleware';
+import { protect, requireFullSession } from '@/shared/middleware/auth.middleware';
 import {
   createPaymentIntentSchema,
   payWithCouponSchema,
@@ -53,12 +53,12 @@ router.post('/flash-plus/begin', paymentController.beginFlashPlus);
 router.post('/flash-plus/verify', paymentController.verifyFlashPlus);
 
 // Get single payment
-router.get('/:paymentId', protect, paymentController.getPayment);
+router.get('/:paymentId', protect, requireFullSession, paymentController.getPayment);
 
 // Get all user payments
-router.get('/', protect, paymentController.getUserPayments);
+router.get('/', protect, requireFullSession, paymentController.getUserPayments);
 
 // Get event payment status
-router.get('/event/:eventId/status', protect, paymentController.getEventPaymentStatus);
+router.get('/event/:eventId/status', protect, requireFullSession, paymentController.getEventPaymentStatus);
 
 export default router;

@@ -40,6 +40,9 @@ export const registerDirectSchema = z.object({
 
 export const setPasswordSchema = z.object({
   password: z.string().min(6, 'Password must be at least 6 characters'),
+  // Demanded by the service whenever the account already has a password — see
+  // setPassword(). Optional here because first-time onboarding has none to give.
+  currentPassword: z.string().optional(),
   phoneNumber: z.string().min(10, 'Phone number must be at least 10 digits').optional(),
   email: z.string().email('Invalid email address').optional(),
 });

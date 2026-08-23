@@ -39,6 +39,7 @@ export interface LoginWithPasswordRequest {
 
 export interface SetPasswordRequest {
   password: string;
+  currentPassword?: string;
   phoneNumber?: string;
   email?: string;
 }

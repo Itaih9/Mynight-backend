@@ -173,3 +173,22 @@ export const apiLimiter = rateLimit({
     statusCode: 429,
   },
 });
+
+/**
+ * The face endpoints are public on purpose — a guest tapping their own face in
+ * the album has no account — but each hit runs a billed Rekognition SearchFaces
+ * and can stream a whole personal album as a zip. Uncapped, one IP could run up
+ * a four-figure AWS bill in a day and enumerate every identified guest at a
+ * wedding. A guest browsing their own album does not come near this.
+ */
+export const facesLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: 'יותר מדי בקשות. נסו שוב בעוד רגע.',
+    statusCode: 429,
+  },
+});
