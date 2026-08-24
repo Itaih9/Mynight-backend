@@ -14,6 +14,7 @@ import {
   israeliPhoneCandidates,
 } from '@/shared/utils/helpers';
 import { ConflictError, NotFoundError, ValidationError } from '@/shared/utils/errors';
+import { packageKeyForTitle } from '@/shared/config/packageFeatures';
 import logger from '@/shared/utils/logger';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
@@ -113,6 +114,7 @@ class EventsService {
       expiresAt,
       weddingDate,
       packageName,
+      packageKey: await this.resolvePackageKey(packageName || ''),
     });
 
     logger.info(`Event created with slug: ${slug} (code: ${eventCode}) by user ${userId}`);
@@ -243,6 +245,30 @@ class EventsService {
     }
 
     return { event, isNew: true };
+  }
+
+  /**
+   * Snapshot the package's stable key at creation time.
+   *
+   * The title the caller sends is whatever the Packages screen currently shows,
+   * so resolving it now is correct; storing the result is what makes a later
+   * rename harmless. Falls back to the historical title map for a title that is
+   * no longer in the collection.
+   */
+  private async resolvePackageKey(packageName: string): Promise<string | undefined> {
+    if (!packageName) return undefined;
+    try {
+      const { Package } = await import('../packages/packages.model');
+      const pkg = await Package.findOne({
+        $or: [{ title: packageName }, { englishTitle: packageName }],
+      })
+        .select('key')
+        .lean();
+      if (pkg?.key) return pkg.key;
+    } catch (err) {
+      logger.error(`Package key lookup failed for "${packageName}": ${(err as Error).message}`);
+    }
+    return packageKeyForTitle(packageName);
   }
 
   /** Lowercase, hyphen-joined, and free of anything a URL would have to escape. */
@@ -430,6 +456,7 @@ class EventsService {
         weddingDate,
         isPaid,
         packageName: packageName || undefined,
+        packageKey: await this.resolvePackageKey(packageName),
         source: 'admin',
         flashTier,
         disposableEnabled,

@@ -6,6 +6,7 @@ import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
 import { NotFoundError, ValidationError } from '@/shared/utils/errors';
 import { planFor, rollLengthFor } from '@/shared/config/flashPlans';
+import { featuresFor } from '@/shared/config/packageFeatures';
 import logger from '@/shared/utils/logger';
 import { nanoid } from 'nanoid';
 import archiver from 'archiver';
@@ -384,7 +385,7 @@ class PhotosService {
       throw new NotFoundError('Event');
     }
 
-    if (event.packageName === 'האוספת') {
+    if (!featuresFor(event).faceAlbums) {
       throw new ValidationError('Face matching is not available for this package');
     }
 
@@ -621,7 +622,7 @@ class PhotosService {
       throw new ValidationError('This event is not yet activated. Please contact the event organizer.');
     }
 
-    if (event.packageName === 'החכמה') {
+    if (!featuresFor(event).guestUpload) {
       throw new ValidationError('Guest upload is not available for this package');
     }
 
@@ -705,7 +706,7 @@ class PhotosService {
   async guestPresignedUrl(eventCodeOrSlug: string, fileName: string, fileType: string) {
     const event = await this.findEventByCodeOrSlug(eventCodeOrSlug);
 
-    if (event.packageName === 'החכמה') {
+    if (!featuresFor(event).guestUpload) {
       throw new ValidationError('Guest upload is not available for this package');
     }
 

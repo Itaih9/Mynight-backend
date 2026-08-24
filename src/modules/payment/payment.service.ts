@@ -110,16 +110,27 @@ class PaymentService {
       throw new ValidationError('לא נמצאה חבילה מתאימה לאירוע. פנו אלינו ונשלים את ההזמנה.');
     }
 
+    // Prefer the key the event was stamped with: it survives a rename in the
+    // Packages screen, where matching on the title would stop finding the
+    // package and refuse a sale the couple is entitled to make.
     const { Package } = await import('../packages/packages.model');
-    const pkg = await Package.findOne({
-      isActive: true,
-      $or: [{ title: packageName }, { englishTitle: packageName }],
-    });
-    if (!pkg) {
-      logger.error(`No active package matches event ${event.eventCode} packageName="${packageName}"`);
+    const pkg = event.packageKey
+      ? await Package.findOne({ isActive: true, key: event.packageKey })
+      : null;
+    const resolved =
+      pkg ||
+      (await Package.findOne({
+        isActive: true,
+        $or: [{ title: packageName }, { englishTitle: packageName }],
+      }));
+
+    if (!resolved) {
+      logger.error(
+        `No active package matches event ${event.eventCode} packageKey="${event.packageKey ?? ''}" packageName="${packageName}"`
+      );
       throw new ValidationError('לא נמצאה חבילה מתאימה לאירוע. פנו אלינו ונשלים את ההזמנה.');
     }
-    return pkg.price;
+    return resolved.price;
   }
 
   async payWithCoupon(

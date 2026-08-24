@@ -29,6 +29,7 @@ export interface IEvent extends Document {
   collectionId: string;
   isPaid: boolean;
   packageName?: string;
+  packageKey?: string;
   paymentId?: mongoose.Types.ObjectId;
   photoCount: number;
   lastPhotoUploadedAt?: Date;
@@ -98,6 +99,13 @@ const eventSchema = new Schema<IEvent>(
       default: false,
     },
     packageName: {
+      type: String,
+      trim: true,
+    },
+    // The package's stable key, snapshotted at creation. packageName is a
+    // display title and is editable in the Packages screen; anything that gates
+    // behaviour must read this instead, or a rename turns the gate off.
+    packageKey: {
       type: String,
       trim: true,
     },
