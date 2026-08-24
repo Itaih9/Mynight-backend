@@ -287,9 +287,9 @@ class EventsService {
       flashTier?: 'basic' | 'plus';
       customSlug?: string;
       disposableEnabled?: boolean;
-      // No shot limit here on purpose: the camera reads the roll length from
-      // planFor(flashTier).shotLimit, so event.disposableShotLimit is never
-      // consulted. Offering the field would promise something that never happens.
+      // No shot limit at creation on purpose: the tier's roll length is the
+      // right default, and the Disposable dialog overrides it per event for the
+      // rare deal that needs a different one.
       sendWelcomeEmail?: boolean;
     },
     opts?: { createdByService?: boolean }

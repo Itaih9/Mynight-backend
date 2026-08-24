@@ -31,4 +31,29 @@ export const FLASH_PLUS_PACKAGE_NAME = 'פלאש+';
 export const planFor = (tier?: string | null): FlashPlan =>
   FLASH_PLANS[tier === 'plus' ? 'plus' : 'basic'];
 
+/** Ceiling on a per-event roll, so a typo cannot hand out an unlimited camera. */
+export const MAX_ROLL_LENGTH = 200;
+
+/**
+ * How many shots one guest gets at this event.
+ *
+ * The tier sets the default (8 free, 24 Plus). `disposableShotLimit` overrides
+ * it per event, for the deals the tiers do not describe — a venue package, a
+ * promo, a couple who asked for a shorter roll.
+ *
+ * Absent means "no override", which is why the schema no longer defaults it:
+ * a stored default is indistinguishable from a deliberate choice, and every
+ * event carrying one would silently pin itself to that number forever.
+ */
+export const rollLengthFor = (event: {
+  flashTier?: string | null;
+  disposableShotLimit?: number | null;
+}): number => {
+  const override = event.disposableShotLimit;
+  if (typeof override === 'number' && Number.isFinite(override) && override > 0) {
+    return Math.min(MAX_ROLL_LENGTH, Math.round(override));
+  }
+  return planFor(event.flashTier).shotLimit;
+};
+
 export const isPlus = (tier?: string | null): boolean => tier === 'plus';

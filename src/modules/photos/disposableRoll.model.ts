@@ -3,7 +3,8 @@ import mongoose, { Document, Schema } from 'mongoose';
 /**
  * Per-guest disposable-camera roll. `fired` counts every shutter press and only
  * ever increases — so deleting a shot removes the photo but never gives the
- * shot back. Remaining = event.disposableShotLimit - fired.
+ * shot back. Remaining = rollLengthFor(event) - fired, which is the event's
+ * own override when it has one and the tier's length otherwise.
  */
 export interface IDisposableRoll extends Document {
   eventId: mongoose.Types.ObjectId;

@@ -137,9 +137,12 @@ const eventSchema = new Schema<IEvent>(
       type: Boolean,
       default: false,
     },
+    // Per-event override of the roll length. NO default on purpose: absent means
+    // "use the tier" (see rollLengthFor). A stored default cannot be told apart
+    // from a deliberate choice, so defaulting it would pin every event to that
+    // number the moment the field started being read.
     disposableShotLimit: {
       type: Number,
-      default: 16,
     },
     source: {
       type: String,

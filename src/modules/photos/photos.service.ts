@@ -5,7 +5,7 @@ import { rekognitionService } from '../rekognition/rekognition.service';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
 import { NotFoundError, ValidationError } from '@/shared/utils/errors';
-import { planFor } from '@/shared/config/flashPlans';
+import { planFor, rollLengthFor } from '@/shared/config/flashPlans';
 import logger from '@/shared/utils/logger';
 import { nanoid } from 'nanoid';
 import archiver from 'archiver';
@@ -798,7 +798,7 @@ class PhotosService {
   async getDisposableStatus(eventCodeOrSlug: string, deviceId?: string) {
     const event = await this.findEventForDisposable(eventCodeOrSlug);
     const plan = planFor(event.flashTier);
-    const shotLimit = plan.shotLimit;
+    const shotLimit = rollLengthFor(event);
     const taken = deviceId ? await this.firedCount(event._id, deviceId) : 0;
     return {
       enabled: !!event.disposableEnabled,
@@ -823,7 +823,7 @@ class PhotosService {
     if (!plan.video && fileType?.startsWith('video/')) {
       throw new ValidationError('וידאו זמין רק ב-Flash Plus');
     }
-    const shotLimit = plan.shotLimit;
+    const shotLimit = rollLengthFor(event);
     const taken = await this.firedCount(event._id, deviceId);
     if (taken >= shotLimit) {
       throw new ValidationError('אזל הפילם 🎞️');
@@ -853,7 +853,7 @@ class PhotosService {
     if (!plan.video && metadata?.mimeType?.startsWith('video/')) {
       throw new ValidationError('וידאו זמין רק ב-Flash Plus');
     }
-    const shotLimit = plan.shotLimit;
+    const shotLimit = rollLengthFor(event);
 
     await this.setUploadStartedIfFirst(event);
 

@@ -17,6 +17,7 @@ import { eventsService } from '../events/events.service';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
 import { NotFoundError, ValidationError } from '@/shared/utils/errors';
+import { MAX_ROLL_LENGTH, rollLengthFor } from '@/shared/config/flashPlans';
 import logger from '@/shared/utils/logger';
 import { nanoid } from 'nanoid';
 import unzipper from 'unzipper';
@@ -591,20 +592,28 @@ class AdminService {
     };
   }
 
-  async updateEventDisposable(eventId: string, data: { enabled?: boolean; shotLimit?: number }) {
+  async updateEventDisposable(eventId: string, data: { enabled?: boolean; shotLimit?: number | null }) {
     const event = await Event.findById(eventId);
     if (!event) {
       throw new NotFoundError('Event');
     }
     if (typeof data.enabled === 'boolean') event.disposableEnabled = data.enabled;
+    // A positive number overrides the tier's roll length; null or 0 clears the
+    // override and hands the event back to its tier. Undefined leaves it alone.
     if (typeof data.shotLimit === 'number' && data.shotLimit > 0) {
-      event.disposableShotLimit = Math.min(200, Math.round(data.shotLimit));
+      event.disposableShotLimit = Math.min(MAX_ROLL_LENGTH, Math.round(data.shotLimit));
+    } else if (data.shotLimit === null || data.shotLimit === 0) {
+      event.disposableShotLimit = undefined;
+      event.markModified('disposableShotLimit');
     }
     await event.save();
     return {
       _id: event._id,
       disposableEnabled: event.disposableEnabled,
-      disposableShotLimit: event.disposableShotLimit,
+      disposableShotLimit: event.disposableShotLimit ?? null,
+      // What a guest will actually get, so the dialog can show the tier default
+      // rather than leaving the admin to guess what "blank" means.
+      effectiveShotLimit: rollLengthFor(event),
     };
   }
 
