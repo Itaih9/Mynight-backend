@@ -157,7 +157,7 @@ class PaymentService {
     // zeroed out and marked the event paid — a free My Night event.
     const originalAmount = await this.resolveAuthoritativeAmount(event, product);
 
-    const couponResult = await couponService.validate(couponCode, event.packageName);
+    const couponResult = await couponService.validate(couponCode, event.packageKey || event.packageName);
     if (!couponResult.valid) {
       throw new ValidationError(couponResult.message);
     }
@@ -258,7 +258,7 @@ class PaymentService {
     let discountPercent = 0;
 
     if (couponCode) {
-      const couponResult = await couponService.validate(couponCode, event.packageName);
+      const couponResult = await couponService.validate(couponCode, event.packageKey || event.packageName);
       if (couponResult.valid) {
         discountPercent = couponResult.discountPercent ?? 0;
         // Fixed-amount (ILS) coupons discount a flat amount; otherwise percent.

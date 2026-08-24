@@ -1,5 +1,6 @@
 import { Package, IPackage } from './packages.model';
 import { NotFoundError, ValidationError } from '@/shared/utils/errors';
+import { packageKeyForTitle } from '@/shared/config/packageFeatures';
 import logger from '@/shared/utils/logger';
 
 const DEFAULT_PACKAGES = [
@@ -9,6 +10,43 @@ const DEFAULT_PACKAGES = [
 ];
 
 class PackagesService {
+  /**
+   * Any way of naming a package — its key, its Hebrew title, its English title —
+   * reduced to the stable key.
+   *
+   * Everything that used to compare titles goes through here, because a title is
+   * editable from the Packages screen and a key is not. The historical-title map
+   * is the last resort, so a reference written down before a rename still
+   * resolves to the package it meant.
+   */
+  async resolveKey(input?: string | null): Promise<string | undefined> {
+    return (await this.resolveRef(input)).key;
+  }
+
+  /**
+   * As resolveKey, but also returns the package's CURRENT display title — for
+   * anything that stores a name to show back to a human, so what is displayed
+   * stays in step with the Packages screen instead of freezing at whatever the
+   * caller happened to type.
+   */
+  async resolveRef(input?: string | null): Promise<{ key?: string; title?: string }> {
+    const value = typeof input === 'string' ? input.trim() : '';
+    if (!value) return {};
+
+    const pkg = await Package.findOne({
+      $or: [{ key: value }, { title: value }, { englishTitle: value }],
+    })
+      .select('key title')
+      .lean();
+
+    if (pkg?.key) return { key: pkg.key, title: pkg.title };
+
+    // Renamed away, or a package that no longer exists: keep the historical key
+    // so restrictions still resolve, and leave the title as the caller gave it.
+    const legacyKey = packageKeyForTitle(value);
+    return legacyKey ? { key: legacyKey, title: value } : {};
+  }
+
   async seedDefaults(): Promise<void> {
     for (const pkg of DEFAULT_PACKAGES) {
       const exists = await Package.findOne({ key: pkg.key });

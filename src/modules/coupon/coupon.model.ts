@@ -12,9 +12,12 @@ export interface ICoupon extends Document {
   affiliateId?: mongoose.Types.ObjectId;
   ownerUserId?: mongoose.Types.ObjectId;
   ownerEventId?: mongoose.Types.ObjectId;
-  // When set, the coupon only applies to this package (by packageName). Empty =
-  // valid for every package.
+  // When set, the coupon only applies to one package. Empty = valid for every
+  // package. packageName is the display title as it stood when the coupon was
+  // written; packageKey is what the check actually compares, because titles are
+  // editable and a rename would otherwise stop the coupon matching anything.
   packageName?: string;
+  packageKey?: string;
   // True once an event coupon has been individually edited, so bulk
   // "apply defaults to existing" leaves it alone.
   customized?: boolean;
@@ -74,6 +77,10 @@ const couponSchema = new Schema<ICoupon>(
       ref: 'Event',
     },
     packageName: {
+      type: String,
+      trim: true,
+    },
+    packageKey: {
       type: String,
       trim: true,
     },

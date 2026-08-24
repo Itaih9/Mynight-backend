@@ -59,13 +59,26 @@ class CouponService {
       affiliateId: data.affiliateId,
       type: data.type || (data.affiliateId ? 'affiliate' : 'standard'),
       packageName: data.packageName || undefined,
+      packageKey: await this.resolvePackageKey(data.packageName),
     });
 
     logger.info(`Coupon created: ${coupon.code} (${coupon.type}) with ${coupon.discountPercent}% discount`);
     return coupon;
   }
 
-  async validate(code: string, packageName?: string): Promise<ValidateCouponResult> {
+  /** Snapshot the stable key for a package restriction written as a title. */
+  private async resolvePackageKey(packageName?: string): Promise<string | undefined> {
+    if (!packageName) return undefined;
+    const { packagesService } = await import('../packages/packages.service');
+    return packagesService.resolveKey(packageName);
+  }
+
+  /**
+   * `packageRef` may be a package key or any of its titles — callers pass an
+   * event's packageKey where they have one and its packageName otherwise, and
+   * the public preview endpoint passes whatever the browser sent.
+   */
+  async validate(code: string, packageRef?: string): Promise<ValidateCouponResult> {
     // Public endpoint with no schema in front of it: a body without a code used
     // to throw on toUpperCase and answer 500.
     if (typeof code !== 'string' || !code.trim()) {
@@ -82,9 +95,23 @@ class CouponService {
       return { valid: false, message: 'Coupon is no longer active' };
     }
 
-    // Package-restricted coupon: only valid for its package.
-    if (coupon.packageName && coupon.packageName !== packageName) {
-      return { valid: false, message: 'הקופון תקף לחבילה אחרת בלבד' };
+    // Package-restricted coupon: only valid for its package. Compared by key,
+    // so renaming a package in the Packages screen cannot quietly stop a
+    // restricted coupon from matching the package it was written for.
+    if (coupon.packageKey || coupon.packageName) {
+      const { packagesService } = await import('../packages/packages.service');
+      const couponKey = coupon.packageKey || (await packagesService.resolveKey(coupon.packageName));
+      const targetKey = await packagesService.resolveKey(packageRef);
+
+      // A restriction we cannot resolve to a key falls back to the old literal
+      // comparison rather than silently letting the coupon through.
+      const matches = couponKey
+        ? couponKey === targetKey
+        : coupon.packageName === packageRef;
+
+      if (!matches) {
+        return { valid: false, message: 'הקופון תקף לחבילה אחרת בלבד' };
+      }
     }
 
     if (coupon.expiresAt && coupon.expiresAt < new Date()) {
@@ -298,6 +325,7 @@ class CouponService {
       discountAmount: amount,
       maxUses: 1,
       packageName: packageName || undefined,
+      packageKey: await this.resolvePackageKey(packageName),
       type: 'gift',
       isActive: true,
     });

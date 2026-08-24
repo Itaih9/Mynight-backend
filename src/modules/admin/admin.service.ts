@@ -18,6 +18,7 @@ import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
 import { NotFoundError, ValidationError } from '@/shared/utils/errors';
 import { MAX_ROLL_LENGTH, rollLengthFor } from '@/shared/config/flashPlans';
+import { packagesService } from '../packages/packages.service';
 import logger from '@/shared/utils/logger';
 import { nanoid } from 'nanoid';
 import unzipper from 'unzipper';
@@ -426,6 +427,8 @@ class AdminService {
       }
     }
 
+    const packageRef = await packagesService.resolveRef(data.packageName);
+
     const coupon = await Coupon.create({
       code: data.code.toUpperCase(),
       discountPercent,
@@ -435,7 +438,11 @@ class AdminService {
       isActive: true,
       affiliateId: data.affiliateId,
       ownerEventId: data.ownerEventId || undefined,
-      packageName: data.packageName || undefined,
+      // The form sends a package KEY; store the key for matching (it survives a
+      // rename, which would otherwise leave the coupon matching nothing) and the
+      // current title for display in the coupon list.
+      packageName: packageRef.title || data.packageName || undefined,
+      packageKey: packageRef.key,
       type: data.affiliateId ? 'affiliate' : 'standard',
     });
 
