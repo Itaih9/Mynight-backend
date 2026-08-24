@@ -402,6 +402,79 @@ export class AdminController {
     }
   }
 
+  /**
+   * Manual event creation from the admin dashboard — for a couple who booked off
+   * the platform and never registered. Mirrors the self-serve flow (account,
+   * face collection, coupons) so the gallery works the moment it exists.
+   */
+  async createEvent(req: Request, res: Response, next: NextFunction) {
+    try {
+      const {
+        partnerName1,
+        partnerName2,
+        phoneNumber,
+        email,
+        weddingDate,
+        packageName,
+        isPaid,
+        flashTier,
+        customSlug,
+        disposableEnabled,
+        sendWelcomeEmail,
+      } = req.body || {};
+
+      const { event, userCreated, phoneNumber: storedPhone, emailSent } = await eventsService.adminCreateEvent(
+        {
+          partnerName1,
+          partnerName2,
+          phoneNumber,
+          email,
+          weddingDate,
+          packageName,
+          isPaid,
+          flashTier,
+          customSlug,
+          disposableEnabled,
+          sendWelcomeEmail,
+        },
+        { createdByService: !!(req as AdminRequest).isServiceToken }
+      );
+
+      res.status(201).json({
+        success: true,
+        data: {
+          _id: event._id,
+          name: event.name,
+          eventCode: event.eventCode,
+          customSlug: event.customSlug,
+          weddingDate: event.weddingDate,
+          isPaid: event.isPaid,
+          flashTier: event.flashTier,
+          packageName: event.packageName,
+          disposableEnabled: event.disposableEnabled,
+          expiresAt: event.expiresAt,
+          userCreated,
+          // The number the couple actually logs in with, normalised — not the
+          // shape the admin typed — and whether mail really went out.
+          phoneNumber: storedPhone,
+          emailSent,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateEventStatus(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { isPaid, flashTier } = req.body || {};
+      const result = await adminService.updateEventStatus(req.params.eventId, { isPaid, flashTier });
+      res.json({ success: true, data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getPendingCounts(_req: Request, res: Response, next: NextFunction) {
     try {
       const counts = await adminService.getPendingCounts();

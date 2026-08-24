@@ -8,7 +8,7 @@ import { couponService } from '../coupon/coupon.service';
 import { env } from '@/shared/config/env';
 import { AppError, NotFoundError, ValidationError } from '@/shared/utils/errors';
 import { whatsappService } from '@/shared/services/whatsapp.service';
-import { generateOTP, generateReferralCode, formatPhoneNumber, generateCustomSlug, isValidEmail } from '@/shared/utils/helpers';
+import { generateOTP, generateReferralCode, formatPhoneNumber, generateCustomSlug, isValidEmail, israeliPhoneCandidates } from '@/shared/utils/helpers';
 import logger from '@/shared/utils/logger';
 import { emailService } from '@/shared/services/email.service';
 import bcrypt from 'bcryptjs';
@@ -559,14 +559,13 @@ class AuthService {
 
       try {
         const paidEvent = await Event.findOne({ userId, isPaid: true }).select('name paymentId').lean();
-        if (paidEvent) {
-          let amount = 0;
-          if (paidEvent.paymentId) {
-            const { Payment } = await import('../payment/payment.model');
-            const payment = await Payment.findById(paidEvent.paymentId).select('amount').lean();
-            amount = payment?.amount ?? 0;
-          }
-          await emailService.sendPaymentConfirmationEmail(user.email, paidEvent.name, amount);
+        // Only confirm a payment that actually happened. An admin-comped event
+        // is isPaid with no paymentId, and the old guard mailed the couple a
+        // receipt reading "Amount: 0.00 ILS" under a green tick.
+        if (paidEvent?.paymentId) {
+          const { Payment } = await import('../payment/payment.model');
+          const payment = await Payment.findById(paidEvent.paymentId).select('amount').lean();
+          await emailService.sendPaymentConfirmationEmail(user.email, paidEvent.name, payment?.amount ?? 0);
         }
       } catch (err: any) {
         logger.warn(`Payment confirmation backfill failed for ${user.email}: ${err.message}`);
@@ -643,14 +642,13 @@ class AuthService {
 
       try {
         const paidEvent = await Event.findOne({ userId, isPaid: true }).select('name paymentId').lean();
-        if (paidEvent) {
-          let amount = 0;
-          if (paidEvent.paymentId) {
-            const { Payment } = await import('../payment/payment.model');
-            const payment = await Payment.findById(paidEvent.paymentId).select('amount').lean();
-            amount = payment?.amount ?? 0;
-          }
-          await emailService.sendPaymentConfirmationEmail(user.email, paidEvent.name, amount);
+        // Only confirm a payment that actually happened. An admin-comped event
+        // is isPaid with no paymentId, and the old guard mailed the couple a
+        // receipt reading "Amount: 0.00 ILS" under a green tick.
+        if (paidEvent?.paymentId) {
+          const { Payment } = await import('../payment/payment.model');
+          const payment = await Payment.findById(paidEvent.paymentId).select('amount').lean();
+          await emailService.sendPaymentConfirmationEmail(user.email, paidEvent.name, payment?.amount ?? 0);
         }
       } catch (err: any) {
         logger.warn(`Backfill payment confirmation email failed for ${user.email}: ${err.message}`);
@@ -743,29 +741,6 @@ class AuthService {
       expiresIn: env.JWT_EXPIRES_IN as string,
     } as jwt.SignOptions);
   }
-}
-
-/**
- * All plausible stored formats of an Israeli phone number, derived from any
- * input. Stored numbers are `+` + digits (see formatPhoneNumber), and the digits
- * vary by how the user typed it (local 0-prefixed, +972, or +9720). We reduce
- * the input to its 9-digit core and expand back to every stored variant.
- */
-function israeliPhoneCandidates(raw: string): string[] {
-  let d = (raw || '').replace(/\D/g, '');
-  if (d.startsWith('972')) d = d.slice(3);
-  d = d.replace(/^0+/, '');
-  const core = d;
-  if (!core) return [];
-  return Array.from(new Set([
-    `+972${core}`,
-    `+9720${core}`,
-    `+0${core}`,
-    `+${core}`,
-    `972${core}`,
-    `0${core}`,
-    core,
-  ]));
 }
 
 export const authService = new AuthService();

@@ -39,6 +39,34 @@ export const formatPhoneNumber = (phone: string): string => {
 };
 
 /**
+ * All plausible stored formats of an Israeli phone number, derived from any
+ * input. Stored numbers are `+` + digits (see formatPhoneNumber), and the digits
+ * vary by how the user typed it (local 0-prefixed, +972, or +9720) and by which
+ * version of formatPhoneNumber wrote the row. We reduce the input to its 9-digit
+ * core and expand back to every stored variant.
+ *
+ * Anything that has to find "the account for this number" must use this rather
+ * than an equality test on the canonical form, or it will miss the legacy rows
+ * and conclude the couple is new.
+ */
+export const israeliPhoneCandidates = (raw: string): string[] => {
+  let d = sanitizePhoneNumber(raw || '');
+  if (d.startsWith('972')) d = d.slice(3);
+  d = d.replace(/^0+/, '');
+  const core = d;
+  if (!core) return [];
+  return Array.from(new Set([
+    `+972${core}`,
+    `+9720${core}`,
+    `+0${core}`,
+    `+${core}`,
+    `972${core}`,
+    `0${core}`,
+    core,
+  ]));
+};
+
+/**
  * Israeli mobile check, run on the NORMALISED number so 050-123-4567,
  * 0501234567, +972501234567 and 972-50-1234567 all validate identically.
  * Mobile prefixes are 05X + 7 digits → +9725XXXXXXXX.

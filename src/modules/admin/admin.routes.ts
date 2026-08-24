@@ -51,6 +51,10 @@ router.patch('/events/:eventId/extend', adminProtect, adminController.extendEven
 router.patch('/events/:eventId/slug', adminProtect, adminController.updateEventSlug);
 router.patch('/events/:eventId/photographer', adminProtect, adminController.updateEventPhotographer);
 router.patch('/events/:eventId/disposable', adminProtect, adminController.updateEventDisposable);
+// Paid/tier is the one thing an event could not previously be talked out of:
+// unpaid rejects every upload, and only a completed payment could clear it. The
+// service token may only touch events it created.
+router.patch('/events/:eventId/status', adminProtect, requireServiceOwnedEvent, adminController.updateEventStatus);
 
 // Email campaigns — audience, timing and copy are all admin-editable.
 router.get('/campaigns', adminProtect, emailCampaignController.list);
@@ -69,6 +73,10 @@ router.get('/whatsapp/events', adminProtect, whatsappController.events);
 // The service token creates flash events here so they're stamped as its own
 // (and therefore deletable by it); a human admin may use it too.
 router.post('/events/flash', adminProtect, adminController.createFlashEvent);
+// Manual event creation for a couple who booked off-platform. Service-token
+// requests are stamped createdByService, same as the flash path, so the
+// automation can clean up its own fixtures and nothing else.
+router.post('/events', adminProtect, adminController.createEvent);
 // Destructive event operations: the service token may only touch events it
 // created; a human admin is unaffected by requireServiceOwnedEvent.
 router.delete('/events/:eventId', adminProtect, requireServiceOwnedEvent, adminController.deleteEvent);

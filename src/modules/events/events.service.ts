@@ -3,8 +3,17 @@ import { User } from '../auth/user.model';
 import { Photo } from '../photos/photos.model';
 import { rekognitionService } from '../rekognition/rekognition.service';
 import { couponService } from '../coupon/coupon.service';
-import { generateEventCode, generateRandomSlugSuffix, formatPhoneNumber, generateReferralCode } from '@/shared/utils/helpers';
-import { NotFoundError, ValidationError } from '@/shared/utils/errors';
+import {
+  generateEventCode,
+  generateRandomSlugSuffix,
+  generateCustomSlug,
+  formatPhoneNumber,
+  generateReferralCode,
+  isValidIsraeliMobile,
+  isValidEmail,
+  israeliPhoneCandidates,
+} from '@/shared/utils/helpers';
+import { ConflictError, NotFoundError, ValidationError } from '@/shared/utils/errors';
 import logger from '@/shared/utils/logger';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
@@ -66,6 +75,26 @@ class EventsService {
     }
   }
 
+  /**
+   * Walk a desired slug to one nothing else holds.
+   *
+   * `generated` says whether the trailing 4 characters are OUR random suffix. If
+   * they are, a collision replaces them rather than stacking a second one, so a
+   * retry never grows the URL. If the slug was typed by a human it is left
+   * whole: stripping the last four characters of `dana-yoav` on collision would
+   * quietly publish `dana-x7k2` and lose a partner's name from the link.
+   */
+  private async resolveUniqueSlug(desired: string, generated = true): Promise<string> {
+    const suffixPattern = /-[a-z0-9]{4}$/;
+    const base = generated && suffixPattern.test(desired) ? desired.slice(0, -5) : desired;
+
+    let slug = desired;
+    while (await Event.findOne({ customSlug: slug })) {
+      slug = `${base}-${generateRandomSlugSuffix()}`;
+    }
+    return slug;
+  }
+
   async createEventWithSlug(userId: string, name: string, customSlug: string, weddingDate: Date, packageName?: string): Promise<IEvent> {
     const eventCode = generateEventCode();
     const collectionId = `event-${eventCode.toLowerCase()}`;
@@ -74,17 +103,7 @@ class EventsService {
 
     const expiresAt = this.computeExpiresAt(weddingDate);
 
-    const suffixPattern = /-[a-z0-9]{4}$/;
-    const slugBase = suffixPattern.test(customSlug)
-      ? customSlug.slice(0, -5)
-      : customSlug;
-
-    let slug = customSlug;
-    let slugExists = await Event.findOne({ customSlug: slug });
-    while (slugExists) {
-      slug = `${slugBase}-${generateRandomSlugSuffix()}`;
-      slugExists = await Event.findOne({ customSlug: slug });
-    }
+    const slug = await this.resolveUniqueSlug(customSlug);
 
     const event = await Event.create({
       userId,
@@ -227,16 +246,252 @@ class EventsService {
     return { event, isNew: true };
   }
 
-  // Guest link + calendar reminders for the couple. Never let a mail failure
-  // abort event creation — the event is the thing that matters.
-  private async sendCreationEmail(userId: string, event: IEvent): Promise<void> {
+  /** Lowercase, hyphen-joined, and free of anything a URL would have to escape. */
+  private normalizeSlug(raw: string): string {
+    return raw
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-]/g, '')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-|-$/g, '');
+  }
+
+  /**
+   * Admin-created event — the manual path for a couple who never came through
+   * registration: a phone sale, a venue deal, a photographer's client, or a
+   * gallery being rebuilt after the fact.
+   *
+   * It deliberately walks the same road the self-serve flow does rather than
+   * writing a bare Event document: the couple gets a real account they can log
+   * into with their own phone number, a Rekognition collection, a gift coupon
+   * and a personal coupon. An event assembled by hand out of half those pieces
+   * looks fine in the admin table and then fails in the gallery.
+   *
+   * Two things it does NOT do. It never mails anyone unless the admin asks —
+   * backfilling last season's weddings must not spray welcome mail at couples
+   * who are already married. And it refuses a phone number that already has an
+   * event: the couple-facing flows all resolve a couple to ONE event
+   * (`Event.findOne({ userId })`), so a second one would be a gallery their
+   * guests can reach and they cannot.
+   */
+  async adminCreateEvent(
+    data: {
+      partnerName1: string;
+      partnerName2?: string;
+      phoneNumber: string;
+      email?: string;
+      weddingDate: Date | string;
+      packageName?: string;
+      isPaid?: boolean;
+      flashTier?: 'basic' | 'plus';
+      customSlug?: string;
+      disposableEnabled?: boolean;
+      // No shot limit here on purpose: the camera reads the roll length from
+      // planFor(flashTier).shotLimit, so event.disposableShotLimit is never
+      // consulted. Offering the field would promise something that never happens.
+      sendWelcomeEmail?: boolean;
+    },
+    opts?: { createdByService?: boolean }
+  ): Promise<{ event: IEvent; userCreated: boolean; phoneNumber: string; emailSent: boolean }> {
+    // Every text field is checked for type before use. A JSON body is whatever
+    // the caller sent, and `.trim()` on a number is a 500 rather than a 400.
+    const text = (value: unknown, field: string): string => {
+      if (value === undefined || value === null) return '';
+      if (typeof value !== 'string') throw new ValidationError(`${field} must be text`);
+      return value.trim();
+    };
+
+    const partner1 = text(data.partnerName1, 'Partner name');
+    const partner2 = text(data.partnerName2, 'Partner name');
+    if (!partner1) {
+      throw new ValidationError('Partner name is required');
+    }
+
+    const rawPhone = text(data.phoneNumber, 'Phone number');
+    if (!isValidIsraeliMobile(rawPhone)) {
+      throw new ValidationError('A valid Israeli mobile number is required');
+    }
+    const phone = formatPhoneNumber(rawPhone);
+
+    const email = text(data.email, 'Email');
+    if (email && !isValidEmail(email)) {
+      throw new ValidationError('Email address is not valid');
+    }
+
+    const weddingDate = new Date(data.weddingDate);
+    if (isNaN(weddingDate.getTime())) {
+      throw new ValidationError('Wedding date is not a valid date');
+    }
+    // Wider than the self-serve rule on purpose: an admin backfilling a gallery
+    // for a wedding that already happened is a real, ordinary case.
+    const earliest = new Date();
+    earliest.setFullYear(earliest.getFullYear() - 5);
+    const latest = new Date();
+    latest.setFullYear(latest.getFullYear() + 5);
+    if (weddingDate < earliest || weddingDate > latest) {
+      throw new ValidationError('Wedding date must be within five years either side of today');
+    }
+
+    const packageName = text(data.packageName, 'Package name');
+    const customSlug = text(data.customSlug, 'Custom link');
+
+    // EVERY check has to clear before the first write. An account created and
+    // then abandoned by a later throw is not merely litter: it is a passwordless
+    // account carrying a real couple's name and number, and the unauthenticated
+    // /api/auth/register/direct mints a FULL session for any account that has no
+    // event — so whoever knows that number could claim it. Nothing below this
+    // line may reject the request.
+    const slugIsGenerated = !customSlug;
+    const desiredSlug = slugIsGenerated
+      ? this.normalizeSlug(generateCustomSlug(partner1, partner2, weddingDate))
+      : this.normalizeSlug(customSlug);
+    if (desiredSlug.length < 3) {
+      throw new ValidationError(
+        'Custom link must be at least 3 characters, using English letters, numbers or hyphens'
+      );
+    }
+
+    // Match the number the way LOGIN matches it. Numbers stored before the
+    // formatPhoneNumber fix live as +0501234567 and other variants, and a lookup
+    // on the canonical form alone would miss a couple who already has an event —
+    // handing them a second gallery, with login landing on whichever one Mongo
+    // returned first and the QR codes pointing at the other.
+    let user = await User.findOne({ phoneNumber: { $in: israeliPhoneCandidates(phone) } });
+    let userCreated = false;
+
+    if (user) {
+      const existing = await Event.findOne({ userId: user._id }).sort({ createdAt: -1 });
+      if (existing) {
+        throw new ConflictError(
+          `${phone} already has an event (${existing.eventCode} — ${existing.name}). Edit that one instead.`
+        );
+      }
+      // Fill gaps without clobbering anything the couple already set themselves.
+      const patch: Record<string, unknown> = {};
+      if (!user.name) patch.name = partner2 ? `${partner1} & ${partner2}` : partner1;
+      if (!user.partnerName1) patch.partnerName1 = partner1;
+      if (!user.partnerName2 && partner2) patch.partnerName2 = partner2;
+      if (!user.weddingDate) patch.weddingDate = weddingDate;
+      if (!user.email && email) patch.email = email;
+      if (Object.keys(patch).length) await User.updateOne({ _id: user._id }, patch);
+    } else {
+      user = await User.create({
+        phoneNumber: phone,
+        name: partner2 ? `${partner1} & ${partner2}` : partner1,
+        partnerName1: partner1,
+        partnerName2: partner2 || undefined,
+        email: email || undefined,
+        weddingDate,
+        referralCode: generateReferralCode(),
+      });
+      userCreated = true;
+    }
+
+    const slug = await this.resolveUniqueSlug(desiredSlug, slugIsGenerated);
+
+    // A wedding more than six months gone would compute an expiry already in the
+    // past, and the gallery refuses an expired event — so the admin would have
+    // created something dead on arrival. Give any such event a full six months
+    // from today instead.
+    const expiresAt = this.computeExpiresAt(weddingDate);
+    const effectiveExpiresAt =
+      expiresAt > new Date() ? expiresAt : this.computeExpiresAt(null, new Date());
+
+    // A body is not a form; `"false"` and `0` are not booleans.
+    const isPaid = data.isPaid === true;
+    const disposableEnabled = data.disposableEnabled === true;
+
+    // Paid means Plus, with no way to ask for otherwise. Every payment path
+    // writes flashTier: 'plus', so a self-serve paid event is always Plus; a
+    // paid event left on basic answers 400 from every face endpoint and gives
+    // guests an 8-shot roll — a fully paid gallery with its album switched off.
+    const flashTier = isPaid ? 'plus' : data.flashTier === 'plus' ? 'plus' : 'basic';
+
+    // The stamp is the automation's licence to delete this event later, so grant
+    // it only for something the token invented outright: a free event on an
+    // account this very call created. A paid gallery, or an event hung on a
+    // couple who already had an account, is somebody's real wedding — and
+    // `createdByService` is precisely the flag that would let the token purge it.
+    const createdByService = !!opts?.createdByService && userCreated && !isPaid;
+
+    const eventCode = generateEventCode();
+    const collectionId = `event-${eventCode.toLowerCase()}`;
+
+    let event: IEvent;
     try {
-      if (!event.weddingDate) return;
+      await rekognitionService.createCollection(collectionId);
+
+      event = await Event.create({
+        userId: user._id,
+        name: partner2 ? `${partner1} & ${partner2}` : partner1,
+        eventCode,
+        customSlug: slug,
+        collectionId,
+        expiresAt: effectiveExpiresAt,
+        weddingDate,
+        isPaid,
+        packageName: packageName || undefined,
+        source: 'admin',
+        flashTier,
+        disposableEnabled,
+        createdByService,
+      });
+    } catch (err) {
+      // AWS was down, or a concurrent create took the slug. Whatever the reason,
+      // an account with no event is a CLAIMABLE account — /api/auth/register/direct
+      // hands a full session to anyone who knows the number — so take it back out
+      // rather than leave one behind for a request that failed.
+      if (userCreated) {
+        await User.deleteOne({ _id: user._id }).catch((cleanupErr) =>
+          logger.error(`Failed to roll back user ${user!._id}: ${(cleanupErr as Error).message}`)
+        );
+      }
+      await rekognitionService
+        .deleteCollection(collectionId)
+        .catch(() => logger.warn(`Left an orphan Rekognition collection: ${collectionId}`));
+
+      // A unique-index clash is the caller losing a race, not a server fault.
+      if ((err as { code?: number }).code === 11000) {
+        throw new ConflictError('That phone number or link was just taken. Please try again.');
+      }
+      throw err;
+    }
+
+    logger.info(
+      `Admin created event ${eventCode} (${slug}) for ${partner1}${partner2 ? ` & ${partner2}` : ''} (${phone}) — paid=${isPaid} tier=${flashTier}`
+    );
+
+    await this.ensureGiftCoupon(String(event._id));
+    try {
+      await couponService.getOrCreatePersonal(String(user._id));
+    } catch (err) {
+      logger.error(`Personal coupon creation failed for ${user._id}: ${(err as Error).message}`);
+    }
+
+    // Report whether mail actually left, rather than whether it was requested.
+    // With no address on the account there is nothing to send to, and the admin
+    // would otherwise close the dialog believing the couple had been told.
+    let emailSent = false;
+    if (data.sendWelcomeEmail) {
+      emailSent = await this.sendCreationEmail(String(user._id), event);
+    }
+
+    return { event, userCreated, phoneNumber: user.phoneNumber, emailSent };
+  }
+
+  // Guest link + calendar reminders for the couple. Never let a mail failure
+  // abort event creation — the event is the thing that matters. Returns whether
+  // the mail actually left, so a caller can tell the operator the truth instead
+  // of assuming a request to send is a send.
+  private async sendCreationEmail(userId: string, event: IEvent): Promise<boolean> {
+    try {
+      if (!event.weddingDate) return false;
 
       const user = await User.findById(userId).select('email').lean();
       if (!user?.email) {
         logger.warn(`No email for user ${userId}; skipping event creation email`);
-        return;
+        return false;
       }
 
       const { emailService } = await import('@/shared/services/email.service');
@@ -245,8 +500,10 @@ class EventsService {
         eventCode: event.eventCode,
         weddingDate: event.weddingDate,
       });
+      return true;
     } catch (err) {
       logger.error(`Event creation email failed for ${event.eventCode}: ${(err as Error).message}`);
+      return false;
     }
   }
 

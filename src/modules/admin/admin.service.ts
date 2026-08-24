@@ -608,6 +608,33 @@ class AdminService {
     };
   }
 
+  /**
+   * Flip an event between unpaid and paid, and set its tier.
+   *
+   * Until this existed, `isPaid` could only ever be set by a completed payment,
+   * so an event created unpaid was stuck: every upload path refuses an unpaid
+   * event (couple upload, guest upload, guest selfie), and the only remedy was
+   * to delete and recreate — burning the event code and personal link already
+   * handed to the couple.
+   *
+   * Paid forces the Plus tier for the same reason the payment paths do: a paid
+   * gallery with face recognition switched off is a broken product.
+   */
+  async updateEventStatus(eventId: string, data: { isPaid?: boolean; flashTier?: string }) {
+    const event = await Event.findById(eventId);
+    if (!event) {
+      throw new NotFoundError('Event');
+    }
+    if (typeof data.isPaid === 'boolean') event.isPaid = data.isPaid;
+    if (data.flashTier === 'basic' || data.flashTier === 'plus') event.flashTier = data.flashTier;
+    if (event.isPaid) event.flashTier = 'plus';
+    await event.save();
+
+    logger.info(`Admin set event ${event.eventCode} to paid=${event.isPaid} tier=${event.flashTier}`);
+
+    return { _id: event._id, isPaid: event.isPaid, flashTier: event.flashTier };
+  }
+
   async updateEventSlug(eventId: string, newSlug: string, resetCount: boolean = false) {
     const slug = newSlug.trim().toLowerCase();
     if (!/^[a-z0-9-]{3,}$/.test(slug)) {

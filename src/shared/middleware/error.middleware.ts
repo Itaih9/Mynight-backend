@@ -27,6 +27,12 @@ export const errorHandler = (
     logger.warn(`400 - malformed ${anyErr.path ?? 'id'} - ${req.originalUrl} - ${req.method}`);
     return res.status(400).json({ success: false, error: 'Invalid identifier', statusCode: 400 });
   }
+  // A unique-index clash is two callers racing for the same phone, slug or code.
+  // That is a conflict, not a server fault, and it used to answer 500.
+  if ((err as Error & { code?: number }).code === 11000) {
+    logger.warn(`409 - duplicate key - ${req.originalUrl} - ${req.method}`);
+    return res.status(409).json({ success: false, error: 'That value is already taken', statusCode: 409 });
+  }
   if (anyErr.name === 'ValidationError' && anyErr.errors) {
     const detail = Object.values(anyErr.errors).map((e) => e.message).join(', ');
     logger.warn(`400 - ${detail} - ${req.originalUrl} - ${req.method}`);
