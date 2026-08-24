@@ -12,6 +12,7 @@ import {
   isValidIsraeliMobile,
   isValidEmail,
   israeliPhoneCandidates,
+  normalizeInstagramHandle,
 } from '@/shared/utils/helpers';
 import { ConflictError, NotFoundError, ValidationError } from '@/shared/utils/errors';
 import { packageKeyForTitle } from '@/shared/config/packageFeatures';
@@ -311,6 +312,11 @@ class EventsService {
       isPaid?: boolean;
       flashTier?: 'basic' | 'plus';
       customSlug?: string;
+      // Credited on the gallery. Collectable here because "a photographer's
+      // client" is one of the reasons this path exists at all — otherwise the
+      // admin has to close the dialog and reopen the event to add it.
+      photographerName?: string;
+      photographerInstagram?: string;
       disposableEnabled?: boolean;
       // No shot limit at creation on purpose: the tier's roll length is the
       // right default, and the Disposable dialog overrides it per event for the
@@ -360,6 +366,12 @@ class EventsService {
 
     const packageName = text(data.packageName, 'Package name');
     const customSlug = text(data.customSlug, 'Custom link');
+    const photographerName = text(data.photographerName, 'Photographer name');
+    // Same normalisation the photographer dialog applies, so a handle typed at
+    // creation and one typed afterwards are stored identically.
+    const photographerInstagram = normalizeInstagramHandle(
+      text(data.photographerInstagram, 'Instagram handle')
+    );
 
     // EVERY check has to clear before the first write. An account created and
     // then abandoned by a later throw is not merely litter: it is a passwordless
@@ -457,6 +469,8 @@ class EventsService {
         isPaid,
         packageName: packageName || undefined,
         packageKey: await this.resolvePackageKey(packageName),
+        photographerName: photographerName || undefined,
+        photographerInstagram,
         source: 'admin',
         flashTier,
         disposableEnabled,

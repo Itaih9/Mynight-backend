@@ -104,6 +104,24 @@ export const sleep = (ms: number): Promise<void> => {
   return new Promise((resolve) => setTimeout(resolve, ms));
 };
 
+/**
+ * An Instagram handle, stored bare — no @, no URL — so the frontend can build
+ * both the display (@handle) and the link (instagram.com/handle) from one value.
+ * Accepts whatever an admin pastes: a handle, @handle, or a full profile URL
+ * with or without a trailing slash or query string.
+ */
+export const normalizeInstagramHandle = (raw?: string): string | undefined => {
+  const handle = (raw || '')
+    .trim()
+    .replace(/^@/, '')
+    // Protocol optional: people paste "instagram.com/studio.noa" as readily as
+    // the full URL, and requiring https:// left that stored as "instagram.com".
+    .replace(/^(https?:\/\/)?(www\.)?instagram\.com\//i, '')
+    .replace(/\/+$/, '')
+    .split(/[/?]/)[0];
+  return handle || undefined;
+};
+
 const SLUG_SUFFIX_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 const generateSlugSuffix = customAlphabet(SLUG_SUFFIX_ALPHABET, 4);
 

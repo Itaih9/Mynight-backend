@@ -19,6 +19,7 @@ import { env } from '@/shared/config/env';
 import { NotFoundError, ValidationError } from '@/shared/utils/errors';
 import { MAX_ROLL_LENGTH, rollLengthFor } from '@/shared/config/flashPlans';
 import { packagesService } from '../packages/packages.service';
+import { normalizeInstagramHandle } from '@/shared/utils/helpers';
 import logger from '@/shared/utils/logger';
 import { nanoid } from 'nanoid';
 import unzipper from 'unzipper';
@@ -579,17 +580,8 @@ class AdminService {
     if (!event) {
       throw new NotFoundError('Event');
     }
-    // Store the IG handle bare (no @, no URL) so the frontend can build both the
-    // display (@handle) and the link (instagram.com/handle) from one value.
-    const handle = (data.photographerInstagram || '')
-      .trim()
-      .replace(/^@/, '')
-      .replace(/^https?:\/\/(www\.)?instagram\.com\//i, '')
-      .replace(/\/+$/, '')
-      .split(/[/?]/)[0];
-
     event.photographerName = (data.photographerName || '').trim() || undefined;
-    event.photographerInstagram = handle || undefined;
+    event.photographerInstagram = normalizeInstagramHandle(data.photographerInstagram);
     await event.save();
 
     return {
