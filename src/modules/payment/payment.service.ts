@@ -94,13 +94,29 @@ class PaymentService {
     }
 
     // The event records which package it is; that is what decides the price.
+    //
+    // Refuse a missing name BEFORE querying, rather than letting an undefined
+    // reach the filter. `$or: [{title: undefined}, {englishTitle: undefined}]`
+    // is not the harmless miss it looks like: the keys are still there, and
+    // whether they reach Mongo depends on the driver's `ignoreUndefined`. At
+    // the default (false) they serialize to null and match nothing — which is
+    // why this has never misfired. Turn that option on, as anyone might to stop
+    // writing nulls, and the clauses become `{}`, the filter matches EVERY
+    // active package, and findOne charges whichever one Mongo returns first.
+    // A price must never be one connection option away from being arbitrary.
+    const packageName = typeof event.packageName === 'string' ? event.packageName.trim() : '';
+    if (!packageName) {
+      logger.error(`Event ${event.eventCode} has no packageName; refusing to guess a price`);
+      throw new ValidationError('לא נמצאה חבילה מתאימה לאירוע. פנו אלינו ונשלים את ההזמנה.');
+    }
+
     const { Package } = await import('../packages/packages.model');
     const pkg = await Package.findOne({
       isActive: true,
-      $or: [{ title: event.packageName }, { englishTitle: event.packageName }],
+      $or: [{ title: packageName }, { englishTitle: packageName }],
     });
     if (!pkg) {
-      logger.error(`No active package matches event ${event.eventCode} packageName="${event.packageName}"`);
+      logger.error(`No active package matches event ${event.eventCode} packageName="${packageName}"`);
       throw new ValidationError('לא נמצאה חבילה מתאימה לאירוע. פנו אלינו ונשלים את ההזמנה.');
     }
     return pkg.price;
