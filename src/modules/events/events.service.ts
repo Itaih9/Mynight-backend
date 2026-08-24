@@ -76,21 +76,20 @@ class EventsService {
   }
 
   /**
-   * Walk a desired slug to one nothing else holds.
+   * Walk a desired slug to one nothing else holds, appending a short suffix only
+   * when it is genuinely taken — so the ordinary couple gets `dana-yoav-19-11-2026`
+   * and only a clash produces `dana-yoav-19-11-2026-x7k2`.
    *
-   * `generated` says whether the trailing 4 characters are OUR random suffix. If
-   * they are, a collision replaces them rather than stacking a second one, so a
-   * retry never grows the URL. If the slug was typed by a human it is left
-   * whole: stripping the last four characters of `dana-yoav` on collision would
-   * quietly publish `dana-x7k2` and lose a partner's name from the link.
+   * It used to STRIP a trailing four characters before retrying, on the
+   * assumption they were our own random suffix. generateCustomSlug no longer
+   * emits one, and that assumption is now actively wrong: every generated slug
+   * ends in its year, which matches the same pattern, so a collision would have
+   * published `dana-yoav-19-11-x7k2` — the wedding year replaced by noise.
    */
-  private async resolveUniqueSlug(desired: string, generated = true): Promise<string> {
-    const suffixPattern = /-[a-z0-9]{4}$/;
-    const base = generated && suffixPattern.test(desired) ? desired.slice(0, -5) : desired;
-
+  private async resolveUniqueSlug(desired: string): Promise<string> {
     let slug = desired;
     while (await Event.findOne({ customSlug: slug })) {
-      slug = `${base}-${generateRandomSlugSuffix()}`;
+      slug = `${desired}-${generateRandomSlugSuffix()}`;
     }
     return slug;
   }
@@ -342,10 +341,9 @@ class EventsService {
     // /api/auth/register/direct mints a FULL session for any account that has no
     // event — so whoever knows that number could claim it. Nothing below this
     // line may reject the request.
-    const slugIsGenerated = !customSlug;
-    const desiredSlug = slugIsGenerated
-      ? this.normalizeSlug(generateCustomSlug(partner1, partner2, weddingDate))
-      : this.normalizeSlug(customSlug);
+    const desiredSlug = customSlug
+      ? this.normalizeSlug(customSlug)
+      : this.normalizeSlug(generateCustomSlug(partner1, partner2, weddingDate));
     if (desiredSlug.length < 3) {
       throw new ValidationError(
         'Custom link must be at least 3 characters, using English letters, numbers or hyphens'
@@ -388,7 +386,7 @@ class EventsService {
       userCreated = true;
     }
 
-    const slug = await this.resolveUniqueSlug(desiredSlug, slugIsGenerated);
+    const slug = await this.resolveUniqueSlug(desiredSlug);
 
     // A wedding more than six months gone would compute an expiry already in the
     // past, and the gallery refuses an expired event — so the admin would have

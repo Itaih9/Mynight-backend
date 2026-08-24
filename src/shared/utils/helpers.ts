@@ -1,3 +1,4 @@
+import { transliterateHebrewName } from './hebrewTranslit';
 import { customAlphabet } from 'nanoid';
 
 export const generateEventCode = (): string => {
@@ -108,26 +109,24 @@ const generateSlugSuffix = customAlphabet(SLUG_SUFFIX_ALPHABET, 4);
 
 export const generateRandomSlugSuffix = (): string => generateSlugSuffix();
 
+/**
+ * The couple's personal link: `dana-yoav-19-11-2026`.
+ *
+ * No random suffix any more. It used to be appended unconditionally, which made
+ * every link four junk characters longer than it needed to be; uniqueness is
+ * resolved by the caller, which only adds a suffix when the slug is genuinely
+ * taken. Transliteration lives in hebrewTranslit.ts — see the note there on why
+ * a letter-for-letter map produced "dnh" and cost every real couple a manual fix.
+ */
 export const generateCustomSlug = (partner1: string, partner2: string, weddingDate: Date): string => {
-  const transliterate = (text: string): string => {
-    const hebrewMap: { [key: string]: string } = {
-      'א': 'a', 'ב': 'b', 'ג': 'g', 'ד': 'd', 'ה': 'h', 'ו': 'v', 'ז': 'z',
-      'ח': 'ch', 'ט': 't', 'י': 'y', 'כ': 'k', 'ך': 'k', 'ל': 'l', 'מ': 'm',
-      'ם': 'm', 'נ': 'n', 'ן': 'n', 'ס': 's', 'ע': 'a', 'פ': 'p', 'ף': 'p',
-      'צ': 'ts', 'ץ': 'ts', 'ק': 'k', 'ר': 'r', 'ש': 'sh', 'ת': 't'
-    };
-    return text.split('').map(char => hebrewMap[char] || char).join('');
-  };
-
-  const cleanName = (name: string): string => {
-    const transliterated = transliterate(name.trim().toLowerCase());
-    return transliterated.replace(/[^a-z0-9]/g, '');
-  };
-
   const date = new Date(weddingDate);
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = date.getFullYear();
 
-  return `${cleanName(partner1)}-${cleanName(partner2)}-${day}-${month}-${year}-${generateSlugSuffix()}`;
+  const names = [transliterateHebrewName(partner1), transliterateHebrewName(partner2)]
+    .filter(Boolean)
+    .join('-');
+
+  return `${names}-${day}-${month}-${year}`.replace(/-{2,}/g, '-').replace(/^-|-$/g, '');
 };
