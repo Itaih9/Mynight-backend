@@ -13,6 +13,7 @@ import {
   isValidEmail,
   israeliPhoneCandidates,
   normalizeInstagramHandle,
+  endsInDigit,
 } from '@/shared/utils/helpers';
 import { ConflictError, NotFoundError, ValidationError } from '@/shared/utils/errors';
 import { packageKeyForTitle } from '@/shared/config/packageFeatures';
@@ -79,14 +80,13 @@ class EventsService {
 
   /**
    * Walk a desired slug to one nothing else holds, appending a short suffix only
-   * when it is genuinely taken — so the ordinary couple gets `dana-yoav-19-11-2026`
-   * and only a clash produces `dana-yoav-19-11-2026-x7k2`.
+   * when it is genuinely taken — so the ordinary couple gets `dana-yoav-19-nov`
+   * and only a clash produces `dana-yoav-19-nov-qkzr`. The suffix is letters
+   * only, so the result still never ends in a digit.
    *
    * It used to STRIP a trailing four characters before retrying, on the
-   * assumption they were our own random suffix. generateCustomSlug no longer
-   * emits one, and that assumption is now actively wrong: every generated slug
-   * ends in its year, which matches the same pattern, so a collision would have
-   * published `dana-yoav-19-11-x7k2` — the wedding year replaced by noise.
+   * assumption they were our own random suffix — which stopped being true once
+   * generateCustomSlug stopped emitting one.
    */
   private async resolveUniqueSlug(desired: string): Promise<string> {
     let slug = desired;
@@ -385,6 +385,14 @@ class EventsService {
     if (desiredSlug.length < 3) {
       throw new ValidationError(
         'Custom link must be at least 3 characters, using English letters, numbers or hyphens'
+      );
+    }
+    // Refused rather than silently patched: it is the admin's own text, and the
+    // reason matters more than the fix. A link ending in a number is a series
+    // to Excel's fill handle, which renumbers it into somebody else's event.
+    if (endsInDigit(desiredSlug)) {
+      throw new ValidationError(
+        'Custom link must not end in a number — Excel renumbers those when you drag a column of links. End it with a letter.'
       );
     }
 

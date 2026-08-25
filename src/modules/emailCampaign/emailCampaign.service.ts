@@ -3,6 +3,7 @@ import { Event } from '../events/events.model';
 import { User } from '../auth/user.model';
 import { env } from '@/shared/config/env';
 import { NotFoundError } from '@/shared/utils/errors';
+import { publicEventRef } from '@/shared/utils/helpers';
 import logger from '@/shared/utils/logger';
 import { sanitizePhoneNumber } from '@/shared/utils/helpers';
 import { clickUrl, signClickToken, trackingBase, withSource, TrackedChannel } from './campaignTracking';
@@ -23,6 +24,9 @@ interface CtaLink {
 interface Recipient {
   eventId: string;
   eventCode: string;
+  // The personal link, when the event has one — camera links prefer it so a
+  // guest sees names rather than eight random characters.
+  customSlug?: string;
   coupleName: string;
   email: string;
   phone: string;
@@ -131,7 +135,7 @@ class EmailCampaignService {
    */
   async listContacts(search = '', limit = 200) {
     const events = await Event.find()
-      .select('_id eventCode name weddingDate isPaid source userId createdAt')
+      .select('_id eventCode customSlug name weddingDate isPaid source userId createdAt')
       .sort({ createdAt: -1 })
       .limit(1000)
       .lean();
@@ -146,6 +150,7 @@ class EmailCampaignService {
       return {
         eventId: String(e._id),
         eventCode: e.eventCode,
+        customSlug: e.customSlug,
         coupleName: e.name,
         email: u?.email || '',
         phone: u?.phoneNumber || '',
@@ -225,6 +230,7 @@ class EmailCampaignService {
       out.push({
         eventId: String(event._id),
         eventCode: event.eventCode,
+        customSlug: event.customSlug,
         coupleName: event.name,
         email,
         phone: (user as any)?.phoneNumber || '',
@@ -247,7 +253,7 @@ class EmailCampaignService {
       .replace(/\{\{coupleName\}\}/g, r.coupleName)
       .replace(/\{\{daysToWedding\}\}/g, String(r.daysToWedding ?? ''))
       .replace(/\{\{eventCode\}\}/g, r.eventCode)
-      .replace(/\{\{cameraUrl\}\}/g, `${env.FRONTEND_URL}/camera/${r.eventCode}`)
+      .replace(/\{\{cameraUrl\}\}/g, `${env.FRONTEND_URL}/camera/${publicEventRef(r)}`)
       .replace(/\{\{ctaUrl\}\}/g, link?.url || '')
       .replace(/\{\{ctaCode\}\}/g, link?.code || '');
   }
@@ -399,6 +405,7 @@ class EmailCampaignService {
       // click lands on no send log and so never shows up in the numbers.
       eventId: '0'.repeat(24),
       eventCode: 'TESTCODE',
+      customSlug: 'dana-yoav-19-nov',
       coupleName: 'דנה & יואב',
       email: to,
       phone: to,
@@ -443,10 +450,11 @@ class EmailCampaignService {
       const raw = campaign?.blocks?.ctaUrl;
       if (!raw) return env.FRONTEND_URL;
 
-      const event = await Event.findById(eventId).select('eventCode name weddingDate').lean();
+      const event = await Event.findById(eventId).select('eventCode customSlug name weddingDate').lean();
       const sample: Recipient = {
         eventId,
         eventCode: event?.eventCode || '',
+        customSlug: event?.customSlug,
         coupleName: event?.name || '',
         email: '',
         phone: '',

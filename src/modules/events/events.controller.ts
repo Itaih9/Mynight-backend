@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import QRCode from 'qrcode';
 import { rollLengthFor } from '@/shared/config/flashPlans';
-import { isValidIsraeliMobile, isValidEmail, isValidWeddingDate } from '@/shared/utils/helpers';
+import { publicEventRef, isValidIsraeliMobile, isValidEmail, isValidWeddingDate } from '@/shared/utils/helpers';
 import { eventsService } from './events.service';
 import { AuthRequest } from '@/shared/middleware/auth.middleware';
 import { env } from '@/shared/config/env';
@@ -49,9 +49,11 @@ export class EventsController {
   // service), cached, and downloadable via ?download=1.
   async getEventQr(req: Request, res: Response, next: NextFunction) {
     try {
-      const code = req.params.code.toUpperCase();
-      await eventsService.getEventByCode(code); // 404s if the code is unknown
-      const target = `${env.FRONTEND_URL}/camera/${code}`;
+      // Accepts a code or a personal slug — the QR is generated from whichever
+      // the event actually has, so the printed link reads with the couple's
+      // names when there is a slug.
+      const event = await eventsService.getEventByCodeOrSlug(req.params.code); // 404s if unknown
+      const target = `${env.FRONTEND_URL}/camera/${publicEventRef(event)}`;
       const png = await QRCode.toBuffer(target, {
         type: 'png',
         width: 720,
@@ -62,7 +64,7 @@ export class EventsController {
       res.setHeader('Content-Type', 'image/png');
       res.setHeader('Cache-Control', 'public, max-age=86400');
       if (req.query.download) {
-        res.setHeader('Content-Disposition', `attachment; filename="mynight-flash-${code}.png"`);
+        res.setHeader('Content-Disposition', `attachment; filename="mynight-flash-${event.eventCode}.png"`);
       }
       res.send(png);
     } catch (error) {
@@ -258,7 +260,7 @@ export class EventsController {
         success: true,
         data: {
           eventCode: event.eventCode,
-          cameraUrl: `${env.FRONTEND_URL}/camera/${event.eventCode}`,
+          cameraUrl: `${env.FRONTEND_URL}/camera/${publicEventRef(event)}`,
           weddingDate: event.weddingDate,
           shotLimit: rollLengthFor(event),
           isNew,

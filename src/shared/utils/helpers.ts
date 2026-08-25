@@ -1,10 +1,26 @@
 import { transliterateHebrewName } from './hebrewTranslit';
 import { customAlphabet } from 'nanoid';
 
+/**
+ * NOTHING WE PUT IN A LINK MAY END IN A DIGIT.
+ *
+ * These codes and slugs get pasted down a spreadsheet column, and Excel's fill
+ * handle treats a trailing number as a series to increment — drag
+ * /camera/7KGKKVX1 and the next row silently becomes /camera/7KGKKVX2, a code
+ * belonging to nobody or, worse, to another couple. A trailing letter is copied
+ * verbatim instead.
+ *
+ * Applies to newly generated values only; existing codes and links keep working.
+ */
+const CODE_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+
+export const endsInDigit = (value: string): boolean => /[0-9]$/.test(value || '');
+
 export const generateEventCode = (): string => {
-  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-  const generate = customAlphabet(alphabet, 8);
-  return generate();
+  const body = customAlphabet(CODE_ALPHABET, 7)();
+  const tail = customAlphabet(CODE_LETTERS, 1)();
+  return `${body}${tail}`;
 };
 
 export const generateOTP = (): string => {
@@ -122,29 +138,51 @@ export const normalizeInstagramHandle = (raw?: string): string | undefined => {
   return handle || undefined;
 };
 
-const SLUG_SUFFIX_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
-const generateSlugSuffix = customAlphabet(SLUG_SUFFIX_ALPHABET, 4);
+// Letters only — a collision suffix is the last thing in the URL, and see
+// endsInDigit above for why nothing in a link may end in a number.
+const generateSlugSuffix = customAlphabet('abcdefghijklmnopqrstuvwxyz', 4);
 
 export const generateRandomSlugSuffix = (): string => generateSlugSuffix();
 
 /**
- * The couple's personal link: `dana-yoav-19-11-2026`.
+ * What to put in a guest-facing link for this event.
  *
- * No random suffix any more. It used to be appended unconditionally, which made
- * every link four junk characters longer than it needed to be; uniqueness is
- * resolved by the caller, which only adds a suffix when the slug is genuinely
- * taken. Transliteration lives in hebrewTranslit.ts — see the note there on why
- * a letter-for-letter map produced "dnh" and cost every real couple a manual fix.
+ * The personal slug when there is one, so the camera link reads
+ * /camera/dana-yoav-19-nov rather than /camera/7KGKKVXX — a guest at a venue is
+ * typing or trusting this, and a name is both friendlier and less error-prone
+ * than eight random characters. Falls back to the code for events that have no
+ * slug (free פלאש signups never get one). Both resolve: the disposable lookup
+ * tries customSlug first and eventCode second.
+ */
+export const publicEventRef = (event: { customSlug?: string | null; eventCode: string }): string =>
+  (event.customSlug || '').trim() || event.eventCode;
+
+/** Month abbreviations, so a wedding date can end a slug in letters. */
+const MONTH_ABBR = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+/**
+ * The couple's personal link: `dana-yoav-19-nov`.
+ *
+ * Ends in the month's name, not the year, because nothing we put in a link may
+ * end in a digit — see endsInDigit above for what Excel does to those. Dropping
+ * the year also shortens the link; two couples sharing a transliterated name AND
+ * a day-and-month in different years is what the collision suffix is for.
+ *
+ * No random suffix any more either. It used to be appended unconditionally,
+ * which made every link four junk characters longer than it needed to be;
+ * uniqueness is resolved by the caller, which only adds a suffix when the slug
+ * is genuinely taken. Transliteration lives in hebrewTranslit.ts — see the note
+ * there on why a letter-for-letter map produced "dnh" and cost every real couple
+ * a manual fix.
  */
 export const generateCustomSlug = (partner1: string, partner2: string, weddingDate: Date): string => {
   const date = new Date(weddingDate);
   const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const year = date.getFullYear();
+  const month = MONTH_ABBR[date.getMonth()] || 'x';
 
   const names = [transliterateHebrewName(partner1), transliterateHebrewName(partner2)]
     .filter(Boolean)
     .join('-');
 
-  return `${names}-${day}-${month}-${year}`.replace(/-{2,}/g, '-').replace(/^-|-$/g, '');
+  return `${names}-${day}-${month}`.replace(/-{2,}/g, '-').replace(/^-|-$/g, '');
 };
