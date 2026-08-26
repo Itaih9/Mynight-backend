@@ -695,7 +695,10 @@ class EventsService {
         `Event ${event.eventCode} purged but S3 objects REMAIN under: ${leftBehind.join(', ')}`
       );
     } else {
-      logger.info(`Event ${event.eventCode}: removed ${deleted} S3 object(s)`);
+      // warn, not info: LOG_LEVEL defaults to 'warn', so an info line is thrown
+      // away in production. Deleting a couple's photos is rare and irreversible
+      // — the one record that it happened, and how much went, has to survive.
+      logger.warn(`Event ${event.eventCode} purged: removed ${deleted} S3 object(s)`);
     }
 
     await Photo.deleteMany({ eventId: event._id });
