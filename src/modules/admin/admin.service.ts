@@ -747,7 +747,10 @@ class AdminService {
    * Paid forces the Plus tier for the same reason the payment paths do: a paid
    * gallery with face recognition switched off is a broken product.
    */
-  async updateEventStatus(eventId: string, data: { isPaid?: boolean; flashTier?: string }) {
+  async updateEventStatus(
+    eventId: string,
+    data: { isPaid?: boolean; flashTier?: string; packageName?: string | null }
+  ) {
     const event = await Event.findById(eventId);
     if (!event) {
       throw new NotFoundError('Event');
@@ -755,11 +758,44 @@ class AdminService {
     if (typeof data.isPaid === 'boolean') event.isPaid = data.isPaid;
     if (data.flashTier === 'basic' || data.flashTier === 'plus') event.flashTier = data.flashTier;
     if (event.isPaid) event.flashTier = 'plus';
+
+    // The package was the last thing about an event that could never be changed
+    // after creation — and it is not cosmetic: it decides the price a couple is
+    // charged and whether they get guest uploads and face albums at all. Getting
+    // it wrong meant delete-and-recreate, burning the link already handed over.
+    if (data.packageName !== undefined) {
+      const wanted = typeof data.packageName === 'string' ? data.packageName.trim() : '';
+      if (!wanted) {
+        event.packageName = undefined;
+        event.packageKey = undefined;
+        event.markModified('packageName');
+        event.markModified('packageKey');
+      } else {
+        const ref = await packagesService.resolveRef(wanted);
+        if (!ref.key) {
+          throw new ValidationError(`Unknown package: ${wanted}`);
+        }
+        // Store the key for every gate, and the CURRENT title for display.
+        event.packageName = ref.title || wanted;
+        event.packageKey = ref.key;
+      }
+    }
+
     await event.save();
 
-    logger.info(`Admin set event ${event.eventCode} to paid=${event.isPaid} tier=${event.flashTier}`);
+    // warn, not info: this changes what a couple is charged and what their
+    // guests can do, and LOG_LEVEL has been low enough to lose info lines.
+    logger.warn(
+      `Admin set event ${event.eventCode}: paid=${event.isPaid} tier=${event.flashTier} package=${event.packageKey || 'none'}`
+    );
 
-    return { _id: event._id, isPaid: event.isPaid, flashTier: event.flashTier };
+    return {
+      _id: event._id,
+      isPaid: event.isPaid,
+      flashTier: event.flashTier,
+      packageName: event.packageName ?? null,
+      packageKey: event.packageKey ?? null,
+    };
   }
 
   async updateEventSlug(eventId: string, newSlug: string, resetCount: boolean = false) {

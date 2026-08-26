@@ -501,8 +501,8 @@ export class AdminController {
 
   async updateEventStatus(req: Request, res: Response, next: NextFunction) {
     try {
-      const { isPaid, flashTier } = req.body || {};
-      const result = await adminService.updateEventStatus(req.params.eventId, { isPaid, flashTier });
+      const { isPaid, flashTier, packageName } = req.body || {};
+      const result = await adminService.updateEventStatus(req.params.eventId, { isPaid, flashTier, packageName });
       res.json({ success: true, data: result });
     } catch (error) {
       next(error);
