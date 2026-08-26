@@ -12,7 +12,7 @@ import { Photo, IPhoto } from '../photos/photos.model';
 import { Payment } from '../payment/payment.model';
 import { ZipJob } from './zipjob.model';
 import { rekognitionService } from '../rekognition/rekognition.service';
-import { collectPhotoFaceIds, displayUrlFor, categoryFromPath } from '../photos/photos.service';
+import { collectPhotoFaceIds, displayUrlFor, categoryFromPath, indexableKeyFor } from '../photos/photos.service';
 import { eventsService } from '../events/events.service';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
@@ -933,16 +933,22 @@ class AdminService {
       });
 
       try {
-        const indexedFaces = await rekognitionService.indexEventPhoto({
-          collectionId: event.collectionId,
-          s3Key,
-          eventId: String(eventId),
-          photoId: String(photo._id),
-        });
-        if (indexedFaces.length > 0) {
-          photo.indexedFaces = indexedFaces;
-          photo.faceId = indexedFaces[0].faceId;
-          await photo.save();
+        // A video is indexed from its poster frame, which may not exist yet —
+        // setVideoPoster picks it up when it does. Rekognition cannot read an
+        // .mp4, so asking it to would only produce an error in the log.
+        const indexKey = await indexableKeyFor(s3Key, file.mimetype);
+        if (indexKey) {
+          const indexedFaces = await rekognitionService.indexEventPhoto({
+            collectionId: event.collectionId,
+            s3Key: indexKey,
+            eventId: String(eventId),
+            photoId: String(photo._id),
+          });
+          if (indexedFaces.length > 0) {
+            photo.indexedFaces = indexedFaces;
+            photo.faceId = indexedFaces[0].faceId;
+            await photo.save();
+          }
         }
       } catch (err) {
         logger.warn(`Failed to index face for ${s3Key}: ${err}`);
@@ -1041,6 +1047,8 @@ class AdminService {
     const photosForIndexing = insertedPhotos.map((p) => ({
       _id: p._id,
       s3Key: p.s3Key,
+      // Carried so a video is indexed from its poster rather than the .mp4.
+      mimeType: p.metadata?.mimeType,
     }));
     this.indexFacesInBackground(photosForIndexing, event.collectionId, String(eventId));
 
@@ -1049,15 +1057,23 @@ class AdminService {
     return { created: insertedPhotos.length };
   }
 
-  private async indexFacesInBackground(photos: { _id: any; s3Key: string }[], collectionId: string, eventId?: string) {
+  private async indexFacesInBackground(
+    photos: { _id: any; s3Key: string; mimeType?: string }[],
+    collectionId: string,
+    eventId?: string
+  ) {
     const CONCURRENCY = 8;
     let cursor = 0;
 
-    const indexOne = async (photo: { _id: any; s3Key: string }) => {
+    const indexOne = async (photo: { _id: any; s3Key: string; mimeType?: string }) => {
       try {
+        // Videos are indexed from their poster frame once it exists; until then
+        // there is nothing Rekognition can read, so skip rather than error.
+        const indexKey = await indexableKeyFor(photo.s3Key, photo.mimeType);
+        if (!indexKey) return;
         const indexedFaces = await rekognitionService.indexEventPhoto({
           collectionId,
-          s3Key: photo.s3Key,
+          s3Key: indexKey,
           eventId,
           photoId: String(photo._id),
         });
@@ -1265,7 +1281,7 @@ class AdminService {
 
       const zip = s3Stream.pipe(unzipper.Parse({ forceStream: true }));
 
-      const uploadedPhotos: { _id: any; s3Key: string }[] = [];
+      const uploadedPhotos: { _id: any; s3Key: string; mimeType?: string }[] = [];
       let totalFiles = 0;
       let completedFiles = 0;
       let failedFiles = 0;
@@ -1309,7 +1325,7 @@ class AdminService {
             },
           });
 
-          uploadedPhotos.push({ _id: photo._id, s3Key: photoS3Key });
+          uploadedPhotos.push({ _id: photo._id, s3Key: photoS3Key, mimeType: photo.metadata?.mimeType });
           completedFiles++;
         } catch (err) {
           logger.warn(`ZIP extraction failed for ${fileName}: ${err}`);

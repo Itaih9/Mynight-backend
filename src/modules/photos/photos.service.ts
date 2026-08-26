@@ -63,6 +63,31 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+export const posterKeyFor = (s3Key: string): string => `${s3Key}-poster.jpg`;
+
+/**
+ * The S3 object Rekognition should actually look at for an upload.
+ *
+ * For an image that is the upload itself. For a VIDEO it is the poster frame:
+ * Rekognition reads images only, so handing it an .mp4 fails every time with
+ * "Request has invalid image format" — which is what the logs were full of, and
+ * why no camera video ever reached a face album.
+ *
+ * The poster is produced asynchronously, so at upload time it usually does not
+ * exist yet. Returning undefined tells the caller to skip quietly instead of
+ * logging an error, and setVideoPoster does the indexing when the poster lands.
+ */
+export async function indexableKeyFor(s3Key: string, mimeType?: string): Promise<string | undefined> {
+  if (!mimeType?.startsWith('video/')) return s3Key;
+  const posterKey = posterKeyFor(s3Key);
+  try {
+    await s3.headObject({ Bucket: env.S3_BUCKET_NAME, Key: posterKey }).promise();
+    return posterKey;
+  } catch {
+    return undefined;
+  }
+}
+
 export function collectPhotoFaceIds(photo: Pick<IPhoto, 'faceId' | 'indexedFaces'>): string[] {
   const ids = [
     photo.faceId,
@@ -251,6 +276,59 @@ class PhotosService {
     return this.takePendingVideoPoster(s3Key) || await this.getExistingVideoPosterUrl(s3Key);
   }
 
+  /**
+   * Index faces and detect categories for one photo, writing the result back.
+   *
+   * `indexKey` is what Rekognition reads — the photo itself, or a video's poster
+   * frame. The faces still belong to the video: they are stored on the video's
+   * own Photo document, so a guest who matches on the poster gets the video in
+   * their album.
+   */
+  private async tagPhoto(params: {
+    photoId: string;
+    eventId: string;
+    collectionId: string;
+    indexKey: string;
+  }): Promise<void> {
+    const { photoId, eventId, collectionId, indexKey } = params;
+    try {
+      const indexedFaces = await rekognitionService.indexEventPhoto({
+        collectionId,
+        s3Key: indexKey,
+        eventId,
+        photoId,
+      });
+      const update: Record<string, unknown> = {};
+      if (indexedFaces.length > 0) {
+        update.indexedFaces = indexedFaces;
+        update.faceId = indexedFaces[0].faceId;
+      }
+      update.aiCategories = await rekognitionService.detectCategories(indexKey);
+      if (Object.keys(update).length) await Photo.findByIdAndUpdate(photoId, update);
+    } catch (err) {
+      logger.error(`Tagging failed for ${indexKey}: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Tag an upload in the background, choosing the right object to read. A video
+   * whose poster has not been generated yet is left for setVideoPoster.
+   */
+  private async tagUpload(params: {
+    photoId: string;
+    eventId: string;
+    collectionId: string;
+    s3Key: string;
+    mimeType?: string;
+  }): Promise<void> {
+    const indexKey = await indexableKeyFor(params.s3Key, params.mimeType);
+    if (!indexKey) {
+      logger.debug(`Deferring tagging for ${params.s3Key} until its poster frame exists`);
+      return;
+    }
+    await this.tagPhoto({ ...params, indexKey });
+  }
+
   private clearShuffleCacheForEvent(eventId: string): void {
     for (const key of this.shuffledIdCache.keys()) {
       if (key.startsWith(`${eventId}:`)) {
@@ -349,23 +427,14 @@ class PhotosService {
       metadata,
     });
 
-    const indexedFaces = await rekognitionService.indexEventPhoto({
+    // Reads the photo itself, or a video's poster frame once it exists.
+    await this.tagUpload({
+      photoId: String(photo._id),
+      eventId: String(eventId),
       collectionId: event.collectionId,
       s3Key,
-      eventId: String(eventId),
-      photoId: String(photo._id),
+      mimeType: metadata?.mimeType,
     });
-    if (indexedFaces.length > 0) {
-      photo.indexedFaces = indexedFaces;
-      photo.faceId = indexedFaces[0].faceId;
-    }
-    // AI wedding categories (best-effort; only for images).
-    if (!metadata?.mimeType?.startsWith('video/')) {
-      photo.aiCategories = await rekognitionService.detectCategories(s3Key);
-    }
-    if (photo.isModified()) {
-      await photo.save();
-    }
 
     await Event.findByIdAndUpdate(eventId, {
       $inc: { photoCount: 1 },
@@ -661,17 +730,13 @@ class PhotosService {
       },
     });
 
-    const indexedFaces = await rekognitionService.indexEventPhoto({
+    await this.tagUpload({
+      photoId: String(photo._id),
+      eventId: String(event._id),
       collectionId: event.collectionId,
       s3Key,
-      eventId: String(event._id),
-      photoId: String(photo._id),
+      mimeType: file.mimetype,
     });
-    if (indexedFaces.length > 0) {
-      photo.indexedFaces = indexedFaces;
-      photo.faceId = indexedFaces[0].faceId;
-      await photo.save();
-    }
 
     await Event.findByIdAndUpdate(event._id, {
       $inc: { photoCount: 1 },
@@ -757,18 +822,12 @@ class PhotosService {
 
     this.clearShuffleCacheForEvent(String(event._id));
 
-    rekognitionService.indexEventPhoto({
+    this.tagUpload({
+      photoId: String(photo._id),
+      eventId: String(event._id),
       collectionId: event.collectionId,
       s3Key,
-      eventId: String(event._id),
-      photoId: String(photo._id),
-    }).then((indexedFaces) => {
-      if (indexedFaces.length > 0) {
-        Photo.findByIdAndUpdate(photo._id, {
-          indexedFaces,
-          faceId: indexedFaces[0].faceId,
-        }).catch((err) => logger.error(`Face indexing failed for ${s3Key}: ${err.message}`));
-      }
+      mimeType: metadata?.mimeType,
     }).catch((err) => logger.error(`Face indexing failed for ${s3Key}: ${err.message}`));
 
     logger.debug(`Guest photo uploaded to event ${event.eventCode} (presigned)`);
@@ -878,20 +937,14 @@ class PhotosService {
     });
     this.clearShuffleCacheForEvent(String(event._id));
 
-    // Face + category tagging, async (never blocks the shutter).
-    rekognitionService.indexEventPhoto({
+    // Face + category tagging, async (never blocks the shutter). A video waits
+    // for its poster frame — see tagUpload.
+    this.tagUpload({
+      photoId: String(photo._id),
+      eventId: String(event._id),
       collectionId: event.collectionId,
       s3Key,
-      eventId: String(event._id),
-      photoId: String(photo._id),
-    }).then(async (indexedFaces) => {
-      const update: any = {};
-      if (indexedFaces.length > 0) {
-        update.indexedFaces = indexedFaces;
-        update.faceId = indexedFaces[0].faceId;
-      }
-      update.aiCategories = await rekognitionService.detectCategories(s3Key);
-      await Photo.findByIdAndUpdate(photo._id, update);
+      mimeType: metadata?.mimeType,
     }).catch((err) => logger.error(`Disposable tagging failed for ${s3Key}: ${err.message}`));
 
     // Count the fired shot — this only ever increases, so deleting a photo
@@ -955,6 +1008,24 @@ class PhotosService {
     await photo.save();
     this.clearShuffleCacheForEvent(String(photo.eventId));
     logger.info(`Poster set for ${s3Key} -> ${posterKey}`);
+
+    // The poster is the first readable image this video has ever had, so this
+    // is the moment its faces can be indexed. Without it a video could never
+    // enter a face album — Rekognition cannot open the .mp4 itself. Skipped if
+    // the video was somehow already indexed, so a re-delivered poster does not
+    // register the same faces twice.
+    if (!collectPhotoFaceIds(photo).length) {
+      const event = await Event.findById(photo.eventId).select('collectionId').lean();
+      if (event?.collectionId) {
+        this.tagPhoto({
+          photoId: String(photo._id),
+          eventId: String(photo.eventId),
+          collectionId: event.collectionId,
+          indexKey: posterKey,
+        }).catch((err) => logger.error(`Poster tagging failed for ${posterKey}: ${err.message}`));
+      }
+    }
+
     return photo;
   }
 
