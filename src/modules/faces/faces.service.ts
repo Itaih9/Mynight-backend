@@ -6,13 +6,14 @@ import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
 import { NotFoundError, ValidationError } from '@/shared/utils/errors';
 import { planFor } from '@/shared/config/flashPlans';
+import { cameraMessage } from '@/shared/config/cameraStrings';
 import logger from '@/shared/utils/logger';
 import archiver from 'archiver';
 
 // Face recognition is a Flash Plus feature; every face endpoint gates on it.
-const requirePlus = (event: { flashTier?: string }) => {
+const requirePlus = (event: { flashTier?: string; cameraLanguage?: string | null }) => {
   if (!planFor(event.flashTier).faceRecognition) {
-    throw new ValidationError('זיהוי הפנים זמין רק ב-Flash Plus');
+    throw new ValidationError(cameraMessage(event, 'FACES_REQUIRE_PLUS'));
   }
 };
 import { Response } from 'express';

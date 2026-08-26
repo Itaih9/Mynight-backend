@@ -43,6 +43,10 @@ export interface IEvent extends Document {
   // Disposable-camera mode: guests shoot a limited film roll via /camera/:code.
   disposableEnabled?: boolean;
   disposableShotLimit?: number;
+  // Language the guest camera speaks. Hebrew unless the couple's guests are not
+  // Hebrew speakers — an English-speaking guest handed a Hebrew shutter screen
+  // simply does not take the photo.
+  cameraLanguage?: 'he' | 'en';
   // Lead-gen: free פלאש signups are the top of the funnel. Which emails a couple
   // has received now lives in EmailSendLog, not here.
   source?: 'flash_free' | 'paid' | 'admin';
@@ -151,6 +155,11 @@ const eventSchema = new Schema<IEvent>(
     // number the moment the field started being read.
     disposableShotLimit: {
       type: Number,
+    },
+    cameraLanguage: {
+      type: String,
+      enum: ['he', 'en'],
+      default: 'he',
     },
     source: {
       type: String,

@@ -705,7 +705,10 @@ class AdminService {
     };
   }
 
-  async updateEventDisposable(eventId: string, data: { enabled?: boolean; shotLimit?: number | null }) {
+  async updateEventDisposable(
+    eventId: string,
+    data: { enabled?: boolean; shotLimit?: number | null; language?: string }
+  ) {
     const event = await Event.findById(eventId);
     if (!event) {
       throw new NotFoundError('Event');
@@ -719,10 +722,12 @@ class AdminService {
       event.disposableShotLimit = undefined;
       event.markModified('disposableShotLimit');
     }
+    if (data.language === 'he' || data.language === 'en') event.cameraLanguage = data.language;
     await event.save();
     return {
       _id: event._id,
       disposableEnabled: event.disposableEnabled,
+      cameraLanguage: event.cameraLanguage || 'he',
       disposableShotLimit: event.disposableShotLimit ?? null,
       // What a guest will actually get, so the dialog can show the tier default
       // rather than leaving the admin to guess what "blank" means.

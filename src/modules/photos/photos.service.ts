@@ -7,6 +7,7 @@ import { env } from '@/shared/config/env';
 import { NotFoundError, ValidationError } from '@/shared/utils/errors';
 import { planFor, rollLengthFor } from '@/shared/config/flashPlans';
 import { featuresFor } from '@/shared/config/packageFeatures';
+import { cameraMessage, cameraLanguageOf } from '@/shared/config/cameraStrings';
 import logger from '@/shared/utils/logger';
 import { nanoid } from 'nanoid';
 import archiver from 'archiver';
@@ -460,7 +461,7 @@ class PhotosService {
 
     // Face recognition is a Flash Plus feature.
     if (!planFor(event.flashTier).faceRecognition) {
-      throw new ValidationError('זיהוי הפנים זמין רק ב-Flash Plus');
+      throw new ValidationError(cameraMessage(event, 'FACES_REQUIRE_PLUS'));
     }
 
     // Upload selfie to S3 temporarily
@@ -870,6 +871,10 @@ class PhotosService {
       // Drives the camera UI: hide video mode on the free tier.
       tier: event.flashTier === 'plus' ? 'plus' : 'basic',
       videoEnabled: plan.video,
+      // Which language the camera speaks, and therefore its text direction.
+      // Sent from here because this is the first call the camera makes, so the
+      // page never renders one language and then swaps.
+      language: cameraLanguageOf(event),
     };
   }
 
@@ -881,12 +886,12 @@ class PhotosService {
     const plan = planFor(event.flashTier);
     // Video is a Flash Plus feature; the free tier is photos only.
     if (!plan.video && fileType?.startsWith('video/')) {
-      throw new ValidationError('וידאו זמין רק ב-Flash Plus');
+      throw new ValidationError(cameraMessage(event, 'VIDEO_REQUIRES_PLUS'));
     }
     const shotLimit = rollLengthFor(event);
     const taken = await this.firedCount(event._id, deviceId);
     if (taken >= shotLimit) {
-      throw new ValidationError('אזל הפילם 🎞️');
+      throw new ValidationError(cameraMessage(event, 'OUT_OF_FILM'));
     }
 
     const key = `events/${event.eventCode}/disposable/${nanoid()}-${fileName}`;
@@ -911,7 +916,7 @@ class PhotosService {
     // Guard the completion path too — a basic-tier client must not slip a video
     // through even if it skipped the presign check.
     if (!plan.video && metadata?.mimeType?.startsWith('video/')) {
-      throw new ValidationError('וידאו זמין רק ב-Flash Plus');
+      throw new ValidationError(cameraMessage(event, 'VIDEO_REQUIRES_PLUS'));
     }
     const shotLimit = rollLengthFor(event);
 
