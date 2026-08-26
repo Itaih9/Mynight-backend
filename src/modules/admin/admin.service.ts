@@ -1,5 +1,7 @@
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { Admin, IAdmin } from './admin.model';
+import { AdminTrustedDevice } from './adminTrustedDevice.model';
 import { User } from '../auth/user.model';
 import { Event } from '../events/events.model';
 import { Coupon } from '../coupon/coupon.model';
@@ -40,7 +42,64 @@ class AdminService {
     }
   }
 
-  async login(email: string, password: string): Promise<{ email: string; emailDelivered: boolean }> {
+  /**
+   * How long a browser stays trusted after a code is entered, and how long the
+   * session token lasts. Kept equal so the panel does not sign you out inside
+   * the window it promised not to ask for a code.
+   */
+  private readonly TRUST_WINDOW_MS = 48 * 60 * 60 * 1000;
+  private readonly SESSION_EXPIRY = '48h';
+
+  private hashDeviceToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  private signAdminToken(admin: IAdmin): string {
+    return jwt.sign(
+      { adminId: admin._id, email: admin.email, role: 'admin' },
+      env.JWT_SECRET,
+      { expiresIn: this.SESSION_EXPIRY }
+    );
+  }
+
+  /**
+   * Issue a device token and remember this browser+IP for the trust window.
+   * Only ever called straight after a successful code, which is what makes the
+   * trust meaningful.
+   */
+  private async rememberDevice(adminId: any, ip: string, userAgent?: string) {
+    const token = crypto.randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + this.TRUST_WINDOW_MS);
+    await AdminTrustedDevice.create({
+      adminId,
+      tokenHash: this.hashDeviceToken(token),
+      ip,
+      userAgent: userAgent?.slice(0, 300),
+      expiresAt,
+    });
+    return { token, expiresAt };
+  }
+
+  /** Forget every remembered browser for one admin. */
+  async revokeTrustedDevices(adminId: any, reason: string): Promise<number> {
+    const res = await AdminTrustedDevice.deleteMany({ adminId });
+    if (res.deletedCount) {
+      logger.info(`Revoked ${res.deletedCount} trusted admin device(s) for ${adminId}: ${reason}`);
+    }
+    return res.deletedCount || 0;
+  }
+
+  async login(
+    email: string,
+    password: string,
+    context?: { deviceToken?: string; ip?: string; userAgent?: string }
+  ): Promise<{
+    email: string;
+    emailDelivered: boolean;
+    requiresOtp: boolean;
+    token?: string;
+    admin?: { id: string; email: string; name: string };
+  }> {
     const admin = await Admin.findOne({ email: email.toLowerCase(), isActive: true });
     if (!admin) {
       throw new ValidationError('Invalid email or password');
@@ -49,6 +108,32 @@ class AdminService {
     const isMatch = await admin.comparePassword(password);
     if (!isMatch) {
       throw new ValidationError('Invalid email or password');
+    }
+
+    // A browser that already passed a code, on the same IP, inside the window:
+    // the password alone is enough. Both halves are required — see the note on
+    // the model for why an IP on its own is not a second factor.
+    const deviceToken = typeof context?.deviceToken === 'string' ? context.deviceToken : '';
+    const ip = context?.ip || '';
+    if (deviceToken && ip) {
+      const trusted = await AdminTrustedDevice.findOne({
+        adminId: admin._id,
+        tokenHash: this.hashDeviceToken(deviceToken),
+        ip,
+        expiresAt: { $gt: new Date() },
+      });
+      if (trusted) {
+        trusted.lastUsedAt = new Date();
+        await trusted.save();
+        logger.info(`Admin ${admin.email} signed in from a trusted device at ${ip} (no code)`);
+        return {
+          email: admin.email,
+          emailDelivered: false,
+          requiresOtp: false,
+          token: this.signAdminToken(admin),
+          admin: { id: String(admin._id), email: admin.email, name: admin.name },
+        };
+      }
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -69,10 +154,14 @@ class AdminService {
       logger.error(`Admin OTP delivery failed for ${admin.email}: ${error.message}`);
     }
 
-    return { email: admin.email, emailDelivered };
+    return { email: admin.email, emailDelivered, requiresOtp: true };
   }
 
-  async verifyOtp(email: string, otp: string): Promise<{ admin: IAdmin; token: string }> {
+  async verifyOtp(
+    email: string,
+    otp: string,
+    context?: { ip?: string; userAgent?: string }
+  ): Promise<{ admin: IAdmin; token: string; deviceToken?: string; trustedUntil?: Date }> {
     const key = email.toLowerCase();
     const entry = adminOtpStore.get(key);
     if (!entry) {
@@ -93,15 +182,22 @@ class AdminService {
       throw new ValidationError('Admin not found');
     }
 
-    const token = jwt.sign(
-      { adminId: admin._id, email: admin.email, role: 'admin' },
-      env.JWT_SECRET,
-      { expiresIn: '24h' }
-    );
+    const token = this.signAdminToken(admin);
 
-    logger.info(`Admin logged in via OTP: ${email}`);
+    // Remember this browser so the next sign-in from the same IP inside the
+    // window needs only the password. No IP means we cannot bind the trust to
+    // anything, so we simply do not offer it.
+    let deviceToken: string | undefined;
+    let trustedUntil: Date | undefined;
+    if (context?.ip) {
+      const remembered = await this.rememberDevice(admin._id, context.ip, context.userAgent);
+      deviceToken = remembered.token;
+      trustedUntil = remembered.expiresAt;
+    }
 
-    return { admin, token };
+    logger.info(`Admin logged in via OTP: ${email}${context?.ip ? ` (device trusted at ${context.ip})` : ''}`);
+
+    return { admin, token, deviceToken, trustedUntil };
   }
 
   async changePassword(adminId: string, currentPassword: string, newPassword: string): Promise<void> {
@@ -121,6 +217,10 @@ class AdminService {
 
     admin.password = newPassword;
     await admin.save();
+
+    // Changing the password is how you react to it having leaked, so every
+    // browser that could skip the code must stop being able to.
+    await this.revokeTrustedDevices(admin._id, 'password changed');
 
     logger.info(`Admin password changed for ${admin.email}`);
 
@@ -183,6 +283,8 @@ class AdminService {
 
     admin.isActive = isActive;
     await admin.save();
+    // A deactivated admin must not keep a browser that skips the code.
+    if (!isActive) await this.revokeTrustedDevices(admin._id, 'admin deactivated');
     logger.info(`Admin ${admin.email} ${isActive ? 'activated' : 'deactivated'}`);
 
     return { _id: admin._id, email: admin.email, name: admin.name, isActive: admin.isActive };
@@ -203,6 +305,7 @@ class AdminService {
       throw new ValidationError('Cannot delete the last active admin');
     }
 
+    await this.revokeTrustedDevices(admin._id, 'admin deleted');
     await admin.deleteOne();
     logger.info(`Admin deleted: ${admin.email}`);
 

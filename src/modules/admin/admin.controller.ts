@@ -7,8 +7,25 @@ import { affiliateService } from '../affiliate/affiliate.service';
 export class AdminController {
   async login(req: Request, res: Response, next: NextFunction) {
     try {
-      const { email, password } = req.body;
-      const result = await adminService.login(email, password);
+      const { email, password, deviceToken } = req.body;
+      // req.ip is the real client address: Express sits behind exactly one
+      // proxy (`trust proxy: 1`) and nginx appends the peer to X-Forwarded-For,
+      // so a client-supplied header cannot become req.ip.
+      const result = await adminService.login(email, password, {
+        deviceToken,
+        ip: req.ip,
+        userAgent: req.get('user-agent') || undefined,
+      });
+
+      if (!result.requiresOtp) {
+        res.json({
+          success: true,
+          data: { requiresOtp: false, token: result.token, admin: result.admin },
+          message: 'Signed in from a trusted device',
+        });
+        return;
+      }
+
       res.json({
         success: true,
         data: { email: result.email, requiresOtp: true, emailDelivered: result.emailDelivered },
@@ -24,7 +41,10 @@ export class AdminController {
   async verifyOtp(req: Request, res: Response, next: NextFunction) {
     try {
       const { email, otp } = req.body;
-      const result = await adminService.verifyOtp(email, otp);
+      const result = await adminService.verifyOtp(email, otp, {
+        ip: req.ip,
+        userAgent: req.get('user-agent') || undefined,
+      });
       res.json({
         success: true,
         data: {
@@ -34,6 +54,10 @@ export class AdminController {
             name: result.admin.name,
           },
           token: result.token,
+          // Kept by the browser and sent on the next sign-in: with the same IP
+          // and inside the window, the password alone gets in.
+          deviceToken: result.deviceToken,
+          trustedUntil: result.trustedUntil,
         },
       });
     } catch (error) {
