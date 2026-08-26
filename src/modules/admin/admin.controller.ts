@@ -436,6 +436,8 @@ export class AdminController {
       const {
         partnerName1,
         partnerName2,
+        partnerName1En,
+        partnerName2En,
         phoneNumber,
         email,
         weddingDate,
@@ -453,6 +455,8 @@ export class AdminController {
         {
           partnerName1,
           partnerName2,
+          partnerName1En,
+          partnerName2En,
           phoneNumber,
           email,
           weddingDate,

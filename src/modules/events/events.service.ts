@@ -305,6 +305,11 @@ class EventsService {
     data: {
       partnerName1: string;
       partnerName2?: string;
+      // Optional English spellings. When given they build the link instead of
+      // transliterating the Hebrew — the couple knows how their name is spelt
+      // and no algorithm beats being told.
+      partnerName1En?: string;
+      partnerName2En?: string;
       phoneNumber: string;
       email?: string;
       weddingDate: Date | string;
@@ -335,6 +340,8 @@ class EventsService {
 
     const partner1 = text(data.partnerName1, 'Partner name');
     const partner2 = text(data.partnerName2, 'Partner name');
+    const partner1En = text(data.partnerName1En, 'English name');
+    const partner2En = text(data.partnerName2En, 'English name');
     if (!partner1) {
       throw new ValidationError('Partner name is required');
     }
@@ -379,9 +386,14 @@ class EventsService {
     // /api/auth/register/direct mints a FULL session for any account that has no
     // event — so whoever knows that number could claim it. Nothing below this
     // line may reject the request.
+    // An English name given here is used verbatim (transliteration passes Latin
+    // through untouched), so the admin can spell it the way the couple does
+    // rather than accept whatever the transliterator guesses.
     const desiredSlug = customSlug
       ? this.normalizeSlug(customSlug)
-      : this.normalizeSlug(generateCustomSlug(partner1, partner2, weddingDate));
+      : this.normalizeSlug(
+          generateCustomSlug(partner1En || partner1, partner2En || partner2, weddingDate)
+        );
     if (desiredSlug.length < 3) {
       throw new ValidationError(
         'Custom link must be at least 3 characters, using English letters, numbers or hyphens'
@@ -646,18 +658,59 @@ class EventsService {
     logger.info(`Event deleted by admin: ${event.eventCode}`);
   }
 
+  /**
+   * Remove an event and everything derived from it.
+   *
+   * EVERY prefix a photo can end up under has to be listed here. The originals
+   * and thumbnails were, but the web-optimised renditions under `display/` were
+   * not — so deleting an event left a full second copy of the couple's photos
+   * in the bucket, still reachable over CloudFront, which serves unsigned URLs.
+   * Anyone holding an old link kept working access to photos we had told the
+   * couple were gone.
+   */
   private async purgeEvent(event: IEvent): Promise<void> {
     await rekognitionService.deleteCollection(event.collectionId);
 
-    await this.deleteS3Prefix(`events/${event.eventCode}/`);
-    await this.deleteS3Prefix(`thumbnails/events/${event.eventCode}/`);
+    const prefixes = [
+      `events/${event.eventCode}/`,
+      `thumbnails/events/${event.eventCode}/`,
+      `display/events/${event.eventCode}/`,
+      // The printed camera QR is generated per event code and cached forever.
+      `static/qr/${event.eventCode.toUpperCase()}.png`,
+    ];
+
+    let deleted = 0;
+    const leftBehind: string[] = [];
+    for (const prefix of prefixes) {
+      const result = await this.deleteS3Prefix(prefix);
+      deleted += result.deleted;
+      if (!result.ok) leftBehind.push(prefix);
+    }
+
+    if (leftBehind.length) {
+      // Loud on purpose: the couple has been told their photos are gone, and
+      // CloudFront serves this bucket unsigned, so anything left is still
+      // fetchable by anyone holding an old link.
+      logger.error(
+        `Event ${event.eventCode} purged but S3 objects REMAIN under: ${leftBehind.join(', ')}`
+      );
+    } else {
+      logger.info(`Event ${event.eventCode}: removed ${deleted} S3 object(s)`);
+    }
 
     await Photo.deleteMany({ eventId: event._id });
 
     await Event.findByIdAndDelete(event._id);
   }
 
-  private async deleteS3Prefix(prefix: string): Promise<void> {
+  /**
+   * Returns how many objects it removed, and whether it got through cleanly.
+   * It used to swallow the failure and return nothing, so a permissions problem
+   * or a half-finished sweep looked exactly like a successful delete — which is
+   * how gigabytes of a deleted couple's photos can sit in the bucket unnoticed.
+   */
+  private async deleteS3Prefix(prefix: string): Promise<{ deleted: number; ok: boolean }> {
+    let deleted = 0;
     try {
       let continuationToken: string | undefined;
       do {
@@ -674,19 +727,31 @@ class EventsService {
           .filter((o) => !!o.Key);
 
         if (objects.length > 0) {
-          await s3
+          const res = await s3
             .deleteObjects({
               Bucket: env.S3_BUCKET_NAME,
               Delete: { Objects: objects, Quiet: true },
             })
             .promise();
+          // Quiet mode reports only failures, so anything named here was NOT
+          // deleted even though the call itself succeeded.
+          const errors = res.Errors || [];
+          if (errors.length) {
+            logger.error(
+              `S3 refused to delete ${errors.length} object(s) under ${prefix}: ${errors[0].Code} ${errors[0].Message}`
+            );
+            return { deleted, ok: false };
+          }
+          deleted += objects.length;
         }
 
         continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
       } while (continuationToken);
     } catch (err: any) {
       logger.error(`Failed to delete S3 objects under prefix ${prefix}: ${err.message}`);
+      return { deleted, ok: false };
     }
+    return { deleted, ok: true };
   }
 
   async updateSlug(eventId: string, userId: string, customSlug: string): Promise<IEvent> {
