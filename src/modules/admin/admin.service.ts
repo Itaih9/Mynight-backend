@@ -100,7 +100,14 @@ class AdminService {
     token?: string;
     admin?: { id: string; email: string; name: string };
   }> {
-    const admin = await Admin.findOne({ email: email.toLowerCase(), isActive: true });
+    // A JSON body is whatever the caller sent. `email.toLowerCase()` on a
+    // number or an object threw, which answered 500 and wrote a stack trace to
+    // the log for what is only ever a malformed request.
+    if (typeof email !== 'string' || typeof password !== 'string') {
+      throw new ValidationError('Invalid email or password');
+    }
+
+    const admin = await Admin.findOne({ email: email.trim().toLowerCase(), isActive: true });
     if (!admin) {
       throw new ValidationError('Invalid email or password');
     }
@@ -162,7 +169,11 @@ class AdminService {
     otp: string,
     context?: { ip?: string; userAgent?: string }
   ): Promise<{ admin: IAdmin; token: string; deviceToken?: string; trustedUntil?: Date }> {
-    const key = email.toLowerCase();
+    // Same reason as login: a non-string here used to be a 500.
+    if (typeof email !== 'string' || typeof otp !== 'string') {
+      throw new ValidationError('OTP expired or not requested');
+    }
+    const key = email.trim().toLowerCase();
     const entry = adminOtpStore.get(key);
     if (!entry) {
       throw new ValidationError('OTP expired or not requested');
