@@ -56,15 +56,24 @@ export class EventsController {
       const target = `${env.FRONTEND_URL}/camera/${publicEventRef(event)}`;
       const png = await QRCode.toBuffer(target, {
         type: 'png',
-        width: 720,
+        // Printed and stuck on a table, then scanned across a dark room by
+        // whatever phone a guest happens to have. Big, with generous error
+        // correction, so a fingerprint or a crease does not kill it.
+        width: 1200,
         margin: 2,
-        errorCorrectionLevel: 'M',
+        errorCorrectionLevel: 'H',
         color: { dark: '#1A1A1A', light: '#FFFFFF' },
       });
       res.setHeader('Content-Type', 'image/png');
       res.setHeader('Cache-Control', 'public, max-age=86400');
       if (req.query.download) {
-        res.setHeader('Content-Disposition', `attachment; filename="mynight-flash-${event.eventCode}.png"`);
+        // Named after the couple when there is a slug: an admin downloading QRs
+        // for several weddings ends up with files they can tell apart, rather
+        // than a folder of eight-character codes.
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="mynight-camera-${publicEventRef(event)}.png"`
+        );
       }
       res.send(png);
     } catch (error) {
