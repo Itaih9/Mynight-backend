@@ -19,6 +19,7 @@ import packagesRoutes from './modules/packages/packages.routes';
 import clientLogRoutes from './modules/clientLog/clientLog.routes';
 import whatsappRoutes from './modules/whatsapp/whatsapp.routes';
 import campaignTrackingRoutes from './modules/emailCampaign/campaignTracking.routes';
+import trackedLinkRoutes from './modules/trackedLink/trackedLink.routes';
 
 export const createApp = (): Application => {
   const app = express();
@@ -75,6 +76,9 @@ export const createApp = (): Application => {
   // never run. The rate limiter is per client IP, so a broadcast being opened
   // by a few hundred different phones doesn't come near it.
   app.use('/api/t', campaignTrackingRoutes);
+  // Tracked QR short links. Under /api because nginx proxies only ^~ /api — a
+  // root-level /q/ would render the SPA and count nothing.
+  app.use('/api/q', trackedLinkRoutes);
 
   app.use((_req: Request, res: Response) => {
     res.status(404).json({
