@@ -20,6 +20,11 @@ README.md
 __tests__/
 test/
 tests/
+# ...except the Wati callback mapping. Wati's vocabulary shifts without notice
+# and every regression there is silent — a reply nobody sees, a read that never
+# happened — so that one file is worth keeping under version control. A
+# negation works here only because no parent directory is excluded above.
+!src/modules/whatsapp/watiWebhook.service.test.ts
 
 # Dev environment
 .env.development

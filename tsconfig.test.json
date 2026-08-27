@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The production build deliberately limits types to "node" so nothing in
+    // dist can lean on a dev-only global. Tests need jest's, and only tests.
+    "types": ["node", "jest"]
+  },
+  "include": ["src/**/*"]
+}
