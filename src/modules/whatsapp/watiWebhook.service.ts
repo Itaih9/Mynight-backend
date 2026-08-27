@@ -68,19 +68,28 @@ const parseTime = (value: unknown): Date => {
 };
 
 /**
- * Map Wati's label onto our five states. Checked most specific first:
- * "sentMessageDELIVERED" contains both "sent" and "deliver", and it means
- * delivered.
+ * Map Wati's label onto our five states.
+ *
+ * Order matters twice over. Most specific first, because "sentMessageDELIVERED"
+ * contains both "sent" and "deliver" and means delivered. And an inbound message
+ * is settled BEFORE the generic labels, because Wati stamps the messages a
+ * contact sends us `statusString: "SENT"` — taken literally, as this did, every
+ * reply we ever received parsed as our own outgoing 'sent'. That never stamps
+ * repliedAt, and handleOne only keeps text on a reply or a failure, so the
+ * couple's answer was dropped on the floor: "did anyone reply to the upsell"
+ * read as silence no matter how many said yes.
  */
 const toStatus = (label: string, incoming: boolean): WhatsAppDeliveryStatus | null => {
   const t = label.toLowerCase();
   if (/fail|error|undeliver|reject|invalid/.test(t)) return 'failed';
-  if (t.includes('replied')) return 'replied';
-  if (t.includes('read')) return 'read';
-  if (t.includes('deliver')) return 'delivered';
-  if (t.includes('sent')) return 'sent';
   // An inbound message on a thread we started is a reply, whatever Wati calls it.
   if (incoming) return 'replied';
+  if (t.includes('replied')) return 'replied';
+  // 'thread' and 'unread' both contain "read", and neither means the couple
+  // read anything; a housekeeping event must not raise the log to 'read'.
+  if (/(?<!th|un)read/.test(t)) return 'read';
+  if (t.includes('deliver')) return 'delivered';
+  if (t.includes('sent')) return 'sent';
   return null;
 };
 
@@ -106,19 +115,32 @@ export const parseWatiEvent = (body: any): ParsedEvent | null => {
 
   const eventType = String(pick(body, ['eventType', 'type', 'event']) || '');
   const statusString = String(pick(body, ['statusString', 'status', 'messageStatus']) || '');
-  // `owner` is Wati's outgoing flag: false means the contact sent it.
+  // `owner` is Wati's outgoing flag: false means the contact sent it. Some
+  // tenants serialise it as the string "false", which read as ours.
   const owner = pick(body, ['owner', 'data.owner']);
-  const incoming = owner === false && /message|received/i.test(eventType);
+  const fromContact = owner === false || owner === 'false';
+  const incoming = fromContact && /message|received/i.test(eventType);
+
+  const status = toStatus(`${eventType} ${statusString}`, incoming);
+
+  // On a failure the text worth keeping is WHY it failed. `text` still carries
+  // the body of the message we sent, so reading it first stored our own copy
+  // as whatsapp.error and left the reason — an expired 24h window, a template
+  // Meta disabled — nowhere to be seen by whoever came to diagnose it.
+  const textKeys =
+    status === 'failed'
+      ? ['failureReason', 'errorMessage', 'eventDescription', 'text']
+      : ['text', 'data.text', 'eventDescription'];
 
   return {
     phone,
     eventType: eventType || statusString || 'unknown',
-    status: toStatus(`${eventType} ${statusString}`, incoming),
-    messageId: clip(pick(body, ['whatsappMessageId', 'messageId', 'id', 'data.whatsappMessageId']), 120),
-    text: clip(
-      pick(body, ['text', 'eventDescription', 'failureReason', 'errorMessage', 'data.text']),
-      500
-    ),
+    status,
+    // A bare `id` is Wati's own record id, not the WhatsApp one — it only wins
+    // when nothing better is present, or it poisons the join key for the
+    // events that follow.
+    messageId: clip(pick(body, ['whatsappMessageId', 'data.whatsappMessageId', 'messageId', 'id']), 120),
+    text: clip(pick(body, textKeys), 500),
     occurredAt: parseTime(pick(body, ['timestamp', 'created', 'eventTime', 'createdAt'])),
   };
 };
