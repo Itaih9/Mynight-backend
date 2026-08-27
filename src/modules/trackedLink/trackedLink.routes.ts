@@ -44,6 +44,35 @@ router.get('/', adminProtect, async (_req: Request, res: Response, next: NextFun
   }
 });
 
+/**
+ * Retire a printed QR, or bring it back. Not a delete — see the service for
+ * why a code that is already on a wall has to outlive its campaign.
+ */
+router.patch('/:code/active', adminProtect, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const link = await trackedLinkService.setActive(req.params.code, (req.body || {}).isActive);
+    res.json({
+      success: true,
+      data: { code: link.code, label: link.label, isActive: link.isActive },
+      message: link.isActive
+        ? 'Link is live again'
+        : 'Link retired — scans stop counting and go to the home page',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** One link's own numbers, for the page that shows a single QR. */
+router.get('/:code/stats', adminProtect, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const days = req.query.days === undefined ? undefined : Number(req.query.days);
+    res.json({ success: true, data: await trackedLinkService.stats(req.params.code, days) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ---- public ------------------------------------------------------------------
 /**
  * The QR image for a tracked link. Public, because it is fetched by whatever is
@@ -83,7 +112,12 @@ router.get('/:code', async (req: Request, res: Response) => {
     // counting those would inflate every number the QR is meant to report.
     if (isPreviewFetch(req.get('user-agent'))) {
       const link = await trackedLinkService.get(req.params.code).catch(() => null);
-      res.redirect(302, link?.targetUrl || env.FRONTEND_URL);
+      // A retired link sends a previewer to the front door too. Before
+      // anything could be retired this branch could not disagree with the
+      // counted path below; now it can, and a dead poster whose preview
+      // still resolved to the old target would be the one place the
+      // retirement did not take.
+      res.redirect(302, link && link.isActive ? link.targetUrl : env.FRONTEND_URL);
       return;
     }
     const destination = await trackedLinkService.recordScan(req.params.code);

@@ -103,6 +103,92 @@ class TrackedLinkService {
     return link;
   }
 
+  /**
+   * Read a flag that decides whether a code already in print still works.
+   *
+   * Strict on purpose. `Boolean(undefined)` is false, so a misspelled or
+   * missing field under a looser reading would quietly retire a live QR, and
+   * the only symptom would be a poster that stopped working for reasons nobody
+   * can see. Refusing is always recoverable; silently retiring is not.
+   */
+  private parseFlag(raw: unknown): boolean {
+    if (typeof raw === 'boolean') return raw;
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    throw new ValidationError('isActive must be true or false');
+  }
+
+  /**
+   * Take a printed QR out of service, or bring it back.
+   *
+   * Deliberately not a delete. The poster is already on a wall and the business
+   * card is already in somebody's pocket; neither can be recalled, so the row
+   * has to outlive the campaign that printed it. Deleting would free the code
+   * for reuse — and a new link inheriting an old poster's scans reports numbers
+   * that were never its own — as well as throwing away the very history the QR
+   * existed to collect. Retired means: stop counting, and send whoever still
+   * scans it to the front door.
+   */
+  async setActive(code: string, rawFlag: unknown): Promise<ITrackedLink> {
+    const isActive = this.parseFlag(rawFlag);
+    const link = await this.get(code);
+    // Nothing to write, and nothing worth a log line claiming a change.
+    if (link.isActive === isActive) return link;
+
+    link.isActive = isActive;
+    await link.save();
+
+    // warn, same as creation: this decides where a code that is already printed
+    // sends people, and LOG_LEVEL has been low enough to lose info lines.
+    logger.warn(`Tracked link /q/${link.code} ${isActive ? 'restored' : 'retired'} (${link.label})`);
+    return link;
+  }
+
+  /**
+   * One link's own numbers, for the page that shows a single QR.
+   *
+   * `daily` is the complete record, and it only holds days that saw a scan: a
+   * chart drawn straight from it closes the gaps and turns a silent fortnight
+   * into a flat line that looks like steady traffic. `series` is that same
+   * record projected onto every day in the window, zeroes included, which is
+   * what a chart should actually draw.
+   */
+  async stats(code: string, days = 30): Promise<Record<string, unknown>> {
+    const link = await this.get(code);
+
+    const requested = Math.trunc(Number(days)) || 30;
+    // A year is the longest anyone asks about, and a poster rarely outlives it.
+    const windowDays = Math.min(Math.max(requested, 1), 365);
+
+    const daily = [...(link.daily || [])].sort((a, b) => a.day.localeCompare(b.day));
+    const counts = new Map(daily.map((d) => [d.day, d.count]));
+
+    const now = Date.now();
+    const series: { day: string; count: number }[] = [];
+    for (let i = windowDays - 1; i >= 0; i--) {
+      // Whole UTC days, stepped the same way a bucket is keyed, so the window
+      // lines up with the rows it is reading.
+      const day = new Date(now - i * 86400000).toISOString().slice(0, 10);
+      series.push({ day, count: counts.get(day) || 0 });
+    }
+
+    return {
+      code: link.code,
+      label: link.label,
+      targetUrl: link.targetUrl,
+      isActive: link.isActive,
+      scans: link.scans,
+      lastScanAt: link.lastScanAt,
+      createdAt: link.createdAt,
+      url: this.scanUrl(link.code),
+      qrUrl: `${env.FRONTEND_URL}/api/q/${link.code}/qr.png`,
+      daily,
+      series,
+      windowDays,
+      windowScans: series.reduce((sum, d) => sum + d.count, 0),
+    };
+  }
+
   /** The URL a QR for this link should encode. */
   scanUrl(code: string): string {
     return `${env.FRONTEND_URL}/api/q/${code}`;
