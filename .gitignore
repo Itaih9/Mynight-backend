@@ -41,6 +41,7 @@ scripts/*
 !scripts/event-video-renditions.js
 !scripts/showcase-index-faces.js
 !scripts/backfill-ai-categories.js
+!scripts/purge-orphaned-event-media.js
 
 # Google Drive folder metadata
 desktop.ini

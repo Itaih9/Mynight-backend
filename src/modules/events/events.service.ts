@@ -506,9 +506,12 @@ class EventsService {
           logger.error(`Failed to roll back user ${user!._id}: ${(cleanupErr as Error).message}`)
         );
       }
-      await rekognitionService
-        .deleteCollection(collectionId)
-        .catch(() => logger.warn(`Left an orphan Rekognition collection: ${collectionId}`));
+      // Checked, not .catch()ed: deleteCollection swallows its own failure and
+      // resolves, so the catch this used to have could never run and an orphan
+      // left by a failed create was never reported.
+      if (!(await rekognitionService.deleteCollection(collectionId))) {
+        logger.warn(`Left an orphan Rekognition collection: ${collectionId}`);
+      }
 
       // A unique-index clash is the caller losing a race, not a server fault.
       if ((err as { code?: number }).code === 11000) {
@@ -669,7 +672,7 @@ class EventsService {
    * couple were gone.
    */
   private async purgeEvent(event: IEvent): Promise<void> {
-    await rekognitionService.deleteCollection(event.collectionId);
+    const collectionGone = await rekognitionService.deleteCollection(event.collectionId);
 
     const prefixes = [
       `events/${event.eventCode}/`,
@@ -685,6 +688,15 @@ class EventsService {
       const result = await this.deleteS3Prefix(prefix);
       deleted += result.deleted;
       if (!result.ok) leftBehind.push(prefix);
+    }
+
+    if (!collectionGone) {
+      // Not photographs, but biometrics taken at the wedding of people who have
+      // been told the event is gone — and nothing else will ever come back for
+      // them, because the event row this id lives on is deleted below.
+      logger.error(
+        `Event ${event.eventCode} purged but its Rekognition collection REMAINS: ${event.collectionId}`
+      );
     }
 
     if (leftBehind.length) {

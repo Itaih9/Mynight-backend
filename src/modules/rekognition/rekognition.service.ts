@@ -96,16 +96,26 @@ class RekognitionService {
     }
   }
 
-  async deleteCollection(collectionId: string): Promise<void> {
+  /**
+   * Returns whether the collection is actually gone — removed here, or already
+   * absent. It used to return nothing either way, so a permissions problem
+   * during an event purge looked exactly like a clean delete and the caller had
+   * no way to tell: the guests' face vectors stayed indexed after the couple
+   * had been told the event was deleted. It still never throws — a collection
+   * left behind is not a reason to abandon the delete of everything else.
+   */
+  async deleteCollection(collectionId: string): Promise<boolean> {
     try {
       await rekognition.deleteCollection({ CollectionId: collectionId }).promise();
       logger.debug(`Rekognition collection deleted: ${collectionId}`);
+      return true;
     } catch (error: any) {
       if (error.code === 'ResourceNotFoundException') {
         logger.warn(`Collection not found: ${collectionId}`);
-        return;
+        return true;
       }
-      logger.error(`Failed to delete Rekognition collection: ${error.message}`);
+      logger.error(`Failed to delete Rekognition collection ${collectionId}: ${error.message}`);
+      return false;
     }
   }
 
