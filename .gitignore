@@ -43,5 +43,10 @@ scripts/*
 !scripts/backfill-ai-categories.js
 !scripts/purge-orphaned-event-media.js
 
+# claude-council output. Plugin working files, written per run and named by
+# timestamp — useful while reviewing, noise in history. .claude/launch.json
+# stays tracked, so ignore the cache dir specifically rather than .claude/.
+.claude/council-cache/
+
 # Google Drive folder metadata
 desktop.ini
