@@ -678,6 +678,11 @@ class EventsService {
       `events/${event.eventCode}/`,
       `thumbnails/events/${event.eventCode}/`,
       `display/events/${event.eventCode}/`,
+      // The photographer's full-resolution zip of the whole wedding. It is
+      // removed best-effort once processed, and that removal only warns on
+      // failure — so every abandoned or failed job leaves a complete copy of
+      // the gallery here, and it was not on this list.
+      `zip-uploads/${event.eventCode}/`,
       // The printed camera QR is generated per event code and cached forever.
       `static/qr/${event.eventCode.toUpperCase()}.png`,
     ];

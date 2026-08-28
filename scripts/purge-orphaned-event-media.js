@@ -22,7 +22,18 @@
  *   node scripts/purge-orphaned-event-media.js --delete           # remove them
  *   node scripts/purge-orphaned-event-media.js --code=7KGKKVXB    # one code
  *   node scripts/purge-orphaned-event-media.js --min-age-hours=48 # default 24
+ *   node scripts/purge-orphaned-event-media.js --max-orphan-ratio=0.2
+ *   node scripts/purge-orphaned-event-media.js --manifest=/var/log/purge.json
  *   node scripts/purge-orphaned-event-media.js --delete --skip-rekognition
+ *
+ * Every valued flag takes its value with an equals sign. `--code ABC` is
+ * refused rather than read as "no --code", because no --code means EVERY
+ * orphan and that is not a difference to discover afterwards.
+ *
+ * A --delete run refuses to start if the bucket has versioning enabled (a
+ * delete there only writes markers and erases nothing), if no code in the
+ * bucket is known to the database, or if the orphaned share is above
+ * --max-orphan-ratio. It writes every key to a manifest before removing it.
  *
  * Reporting is the DEFAULT here, the opposite of the other scripts in this
  * folder, which do their work unless given --dry-run. Those write; this one
@@ -35,6 +46,11 @@
 require('dotenv').config();
 const AWS = require('aws-sdk');
 const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
+
+/** Escape a string for use inside a RegExp, so a key cannot smuggle syntax. */
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
  * Every prefix under which event media is written, and the only ones this
@@ -42,7 +58,16 @@ const mongoose = require('mongoose');
  * a prefix missing from THAT list is what created the orphans in the first
  * place, and a prefix missing from THIS one leaves them behind again.
  */
-const MEDIA_ROOTS = ['events/', 'thumbnails/events/', 'display/events/'];
+const MEDIA_ROOTS = [
+  'events/',
+  'thumbnails/events/',
+  'display/events/',
+  // The photographer's full-resolution zip of the whole wedding. It is removed
+  // best-effort after processing, so every failed or abandoned job leaves a
+  // complete copy of the gallery here. Missing from the first version of this
+  // list — the same omission that created the orphans in the first place.
+  'zip-uploads/',
+];
 /** The printed camera QR: one object per code, not a prefix. */
 const QR_ROOT = 'static/qr/';
 /** Rekognition collection id for an event, as built by events.service.ts. */
@@ -58,6 +83,14 @@ const PROTECTED_COLLECTIONS = new Set(['gallery-showcase']);
 /** S3 refuses more than 1000 keys in one DeleteObjects call. */
 const DELETE_BATCH = 1000;
 
+/**
+ * Refuse to run when this share of the bucket's codes is unknown to the
+ * database. The expected shape is a handful of orphans against every live
+ * event; "most of the bucket is orphaned" is the signature of pointing at the
+ * wrong database, not of a real backlog.
+ */
+const DEFAULT_MAX_ORPHAN_RATIO = 0.5;
+
 // ---------------------------------------------------------------------------
 // Decisions. Kept free of AWS and mongo so they can be exercised directly.
 // ---------------------------------------------------------------------------
@@ -71,13 +104,40 @@ const DELETE_BATCH = 1000;
 const codeKey = (code) => String(code || '').trim().toUpperCase();
 
 /**
- * Generated codes are 8 chars from a fixed alphabet, but events predating that
- * generator exist, so this is deliberately loose. Its job is only to reject the
- * things that are not codes at all — `undefined/`, a stray file, a path that
- * arrived by some route nobody remembers. Those are reported and left alone:
- * "I don't recognise this" is a reason to ask a human, not to delete.
+ * Names that are obviously somebody's folder rather than an event. A generated
+ * code cannot collide with these — it is uppercase and at least six characters
+ * — so excluding them costs nothing and stops the sweep eating a directory a
+ * human made by hand.
  */
-const isEventCodeShape = (code) => /^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$/.test(String(code || ''));
+const RESERVED_NAMES = new Set([
+  'undefined', 'null', 'nan', 'none', 'default',
+  'test', 'tests', 'temp', 'tmp', 'backup', 'backups', 'archive', 'archives',
+  'old', 'new', 'staging', 'prod', 'production', 'migration', 'migrations',
+]);
+
+/**
+ * Whether a directory name is an event code.
+ *
+ * The first version of this accepted anything three characters or longer, which
+ * meant it returned TRUE for `undefined` — the very example its own comment
+ * gave as the thing it was there to reject, and the exact directory a live
+ * event's photos land in when eventCode is undefined at write time. It also
+ * accepted `test`, `backup` and `staging`.
+ *
+ * Codes are generated uppercase from an alphabet with no 0/I/O, and mongoose
+ * uppercases eventCode on the way in, so the bucket holds uppercase. Requiring
+ * that rejects every lowercase word without needing to enumerate them. The
+ * reserved list covers the uppercase spellings.
+ *
+ * A lowercase directory that IS a live code is still safe: codes are matched
+ * case-insensitively against the database first, so it lands in `inUse` and is
+ * never offered to this function's verdict at all.
+ */
+const isEventCodeShape = (code) => {
+  const name = String(code || '');
+  if (!/^[A-Z0-9]{6,16}$/.test(name)) return false;
+  return !RESERVED_NAMES.has(name.toLowerCase());
+};
 
 /**
  * Split what the bucket holds into what the database still knows about, what it
@@ -89,8 +149,13 @@ function classifyCodes(s3Codes, liveCodes) {
   const inUse = [];
   const unrecognized = [];
   for (const code of s3Codes) {
-    if (!isEventCodeShape(code)) unrecognized.push(code);
-    else if (live.has(codeKey(code))) inUse.push(code);
+    // The DATABASE is asked first, and case-insensitively. A directory that
+    // belongs to a live event is in use however it is spelled — and if that
+    // were decided by the shape rule instead, a lowercase directory holding a
+    // live event's photos would count as "unrecognized" rather than "in use",
+    // which is also one of the numbers the environment-coherence rail reads.
+    if (live.has(codeKey(code))) inUse.push(code);
+    else if (!isEventCodeShape(code)) unrecognized.push(code);
     else orphans.push(code);
   }
   return { orphans, inUse, unrecognized };
@@ -140,6 +205,25 @@ const humanBytes = (bytes) => {
 // S3
 // ---------------------------------------------------------------------------
 
+/**
+ * On a versioned bucket, deleteObjects without a VersionId writes a delete
+ * marker: CloudFront stops serving, but every byte is still there and still
+ * readable to anything holding s3:GetObjectVersion — while this script prints
+ * "14.3 GB freed". That is concealment reported as erasure, which is the exact
+ * failure this whole line of work exists to remove. Refuse rather than lie.
+ */
+async function assertNotVersioned(s3, bucket) {
+  const res = await s3.getBucketVersioning({ Bucket: bucket }).promise();
+  const status = res && res.Status;
+  if (status === 'Enabled' || status === 'Suspended') {
+    throw new Error(
+      `Bucket ${bucket} has versioning ${status}. A delete here only writes delete markers — ` +
+        'the objects remain and stay retrievable by version, so nothing would actually be erased. ' +
+        'Refusing. Purge versions deliberately, or re-run with --allow-versioned once you know that is what you want.'
+    );
+  }
+}
+
 /** Directory names directly under a prefix, via the delimiter. */
 async function listChildPrefixes(s3, bucket, root) {
   const found = [];
@@ -150,6 +234,22 @@ async function listChildPrefixes(s3, bucket, root) {
       .promise();
     for (const cp of page.CommonPrefixes || []) {
       if (cp.Prefix) found.push(cp.Prefix);
+    }
+    token = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (token);
+  return found;
+}
+
+/** Objects directly under a prefix, excluding anything inside a subdirectory. */
+async function listObjectsShallow(s3, bucket, root) {
+  const found = [];
+  let token;
+  do {
+    const page = await s3
+      .listObjectsV2({ Bucket: bucket, Prefix: root, Delimiter: '/', ContinuationToken: token })
+      .promise();
+    for (const obj of page.Contents || []) {
+      if (obj.Key && obj.Key !== root) found.push(obj);
     }
     token = page.IsTruncated ? page.NextContinuationToken : undefined;
   } while (token);
@@ -185,10 +285,18 @@ async function collectS3Codes(s3, bucket) {
     byCode.get(key).targets.push(target);
   };
 
+  const loose = [];
   for (const root of MEDIA_ROOTS) {
     for (const prefix of await listChildPrefixes(s3, bucket, root)) {
       const code = prefix.slice(root.length).replace(/\/+$/, '');
       if (code) remember(code, prefix);
+    }
+    // A delimiter listing returns directories and nothing else, so a file
+    // sitting loose at events/stray.jpg belongs to no code, is invisible to
+    // every count this script prints, and would be reported as swept. Surface
+    // it; never delete it, since it belongs to nothing we can reason about.
+    for (const obj of await listObjectsShallow(s3, bucket, root)) {
+      loose.push(obj.Key);
     }
   }
 
@@ -198,7 +306,7 @@ async function collectS3Codes(s3, bucket) {
     remember(name.replace(/\.png$/i, ''), obj.Key);
   }
 
-  return byCode;
+  return { byCode, loose };
 }
 
 /** Count, bytes and newest timestamp across everything held for one code. */
@@ -266,10 +374,26 @@ async function sweep(deps, options) {
     liveCodes,
     liveCollectionIds,
     stillLive,
+    // Does any live Photo row still point INTO this prefix? photos.s3Key is the
+    // authoritative record of what belongs to a live event — the code in the
+    // path is only a convention. This catches what the name never can: photos
+    // written under a code the directory spells differently, and anything that
+    // landed in events/undefined/ because eventCode was undefined at write time.
+    stillReferenced = async () => false,
+    // Called with the full key list before a single delete, so there is a
+    // record of what was removed. An irreversible deletion with no manifest
+    // cannot answer "did you erase X" for a couple or a regulator.
+    writeManifest = async () => {},
     now = () => Date.now(),
     log = console.log,
   } = deps;
-  const { apply = false, minAgeHours = 24, onlyCode = null } = options || {};
+  const {
+    apply = false,
+    minAgeHours = 24,
+    onlyCode = null,
+    maxOrphanRatio = DEFAULT_MAX_ORPHAN_RATIO,
+    allowVersioned = false,
+  } = options || {};
 
   // A database that answers "no events at all" is far more likely to be the
   // wrong MONGO_URI, an unreadable collection or a half-open connection than a
@@ -279,7 +403,9 @@ async function sweep(deps, options) {
     throw new Error('The database reports zero events. Refusing to treat the whole bucket as orphaned.');
   }
 
-  const byCode = await collectS3Codes(s3, bucket);
+  if (apply && !allowVersioned) await assertNotVersioned(s3, bucket);
+
+  const { byCode, loose } = await collectS3Codes(s3, bucket);
   const { orphans, inUse, unrecognized } = classifyCodes(
     [...byCode.values()].map((entry) => entry.code),
     liveCodes
@@ -287,8 +413,32 @@ async function sweep(deps, options) {
 
   log(`${liveCodes.length} event(s) in the database; ${byCode.size} code(s) with media in ${bucket}`);
   log(`  ${inUse.length} in use, ${orphans.length} orphaned, ${unrecognized.length} unrecognized`);
+
+  // The zero-events rail above catches an EMPTY database. This one catches a
+  // WRONG one — a staging MONGO_URI beside the production S3_BUCKET_NAME, both
+  // read from whatever .env the operator happens to be standing in. There
+  // liveCodes is not empty, every real code classifies as an orphan, and the
+  // per-code re-read queries that same wrong database and agrees. Nothing
+  // downstream can catch it; the shape of the answer is the only tell.
+  if (apply && inUse.length === 0 && orphans.length > 0) {
+    throw new Error(
+      `Not one of the ${byCode.size} code(s) in ${bucket} is in this database. ` +
+        'That is a bucket and a database from different environments, not a backlog. Refusing.'
+    );
+  }
+  const orphanRatio = byCode.size ? orphans.length / byCode.size : 0;
+  if (apply && orphanRatio > maxOrphanRatio) {
+    throw new Error(
+      `${orphans.length} of ${byCode.size} code(s) (${Math.round(orphanRatio * 100)}%) are unknown to this database, ` +
+        `above the ${Math.round(maxOrphanRatio * 100)}% limit. Refusing — check MONGO_URI and S3_BUCKET_NAME agree. ` +
+        'Raise deliberately with --max-orphan-ratio= if this really is the backlog.'
+    );
+  }
   for (const name of unrecognized) {
     log(`  ? "${name}" is not an event code — left alone, look at it by hand`);
+  }
+  for (const key of loose) {
+    log(`  ? ${key} sits loose under a media root, belonging to no code — left alone`);
   }
 
   const wanted = onlyCode
@@ -305,6 +455,7 @@ async function sweep(deps, options) {
     bytesFreed: 0,
     skippedTooNew: 0,
     skippedRecreated: 0,
+    skippedReferenced: 0,
     failures: [],
     collectionsDeleted: 0,
   };
@@ -330,13 +481,25 @@ async function sweep(deps, options) {
       continue;
     }
 
+    // And ask the photos themselves, not just the event name.
+    if (await stillReferenced(targets)) {
+      summary.skippedReferenced++;
+      log(`    ! ${code} still has photo rows pointing at it. Left untouched.`);
+      continue;
+    }
+
+    await writeManifest(code, objects);
+
     const { deleted, failures } = await deleteObjects(s3, bucket, objects.map((o) => o.Key));
     summary.objectsDeleted += deleted;
-    summary.bytesFreed += bytes;
     if (failures.length) {
       summary.failures.push(...failures);
       log(`    FAILED to delete ${failures.length} object(s): ${failures[0]}`);
     } else {
+      // Counted here, not before the check: a code whose delete was partly
+      // refused used to report its whole measured size as freed, and that
+      // number is the one a compliance answer would quote.
+      summary.bytesFreed += bytes;
       summary.purged++;
       log(`    deleted ${deleted} object(s)`);
     }
@@ -351,6 +514,19 @@ async function sweep(deps, options) {
       if (onlyCode && codeKey(code) !== codeKey(onlyCode)) continue;
       log(`  - ${id}`);
       if (!apply) continue;
+
+      // The S3 side has --min-age-hours for the create-during-run race. The
+      // collection side had nothing — and it is the WORSE race: every creation
+      // path calls createCollection BEFORE Event.create, so the window where a
+      // live event has a collection and no row is real. Losing it is silent,
+      // because indexEventPhoto swallows the missing-collection error, and
+      // face search is then dead for that wedding forever.
+      const createdMs = await collectionCreatedAt(rekognition, id);
+      if (!isOldEnough(createdMs, now(), minAgeHours)) {
+        summary.skippedTooNew++;
+        log(`    ~ created ${((now() - createdMs) / 3600000).toFixed(1)}h ago — younger than ${minAgeHours}h, skipped`);
+        continue;
+      }
       if (await stillLive(code)) {
         summary.skippedRecreated++;
         log(`    ! ${code} exists in the database now. Left untouched.`);
@@ -372,6 +548,19 @@ async function sweep(deps, options) {
   }
 
   return summary;
+}
+
+/** When a collection was created, or null if that cannot be established. */
+async function collectionCreatedAt(rekognition, collectionId) {
+  try {
+    const res = await rekognition.describeCollection({ CollectionId: collectionId }).promise();
+    return res && res.CreationTimestamp ? new Date(res.CreationTimestamp).getTime() : null;
+  } catch {
+    // Unknown age is not a reason to delete. Treated as "too new" by the caller
+    // only if we return something recent; null means isOldEnough passes, so be
+    // explicit and report now() to hold it back instead.
+    return Date.now();
+  }
 }
 
 async function listCollections(rekognition) {
@@ -402,6 +591,17 @@ function parseArgs(args) {
     return found === undefined ? undefined : found.slice(`--${name}=`.length);
   };
 
+  // `--code ABC` rather than `--code=ABC` would be read as no --code at all,
+  // and no --code means EVERY orphan. Refuse the spelling instead of quietly
+  // widening the run.
+  const VALUED = ['code', 'min-age-hours', 'max-orphan-ratio', 'manifest'];
+  for (const name of VALUED) {
+    const bare = args.indexOf(`--${name}`);
+    if (bare !== -1) {
+      throw new Error(`--${name} takes its value with an equals sign: --${name}=<value>`);
+    }
+  }
+
   const rawAge = value('min-age-hours');
   // Number('') is 0, so an empty value would read as "sweep everything however
   // fresh" — the age guard switched off by a typo, silently.
@@ -410,21 +610,41 @@ function parseArgs(args) {
     throw new Error(`--min-age-hours must be a non-negative number, got "${rawAge}"`);
   }
 
-  const onlyCode = value('code') || null;
+  // An empty --code= is the dangerous one: `--code=$CODE` with an unset shell
+  // variable produced onlyCode=null, which is not "that one code" but "every
+  // orphan in the bucket". Same class as `rm -rf $VAR/`.
+  const rawCode = value('code');
+  if (rawCode !== undefined && rawCode.trim() === '') {
+    throw new Error('--code= was given with no value. Refusing: an empty --code would sweep every orphan, not one.');
+  }
+  const onlyCode = rawCode === undefined ? null : rawCode.trim();
   if (onlyCode !== null && !isEventCodeShape(onlyCode)) {
     throw new Error(`--code="${onlyCode}" is not an event code`);
+  }
+
+  const rawRatio = value('max-orphan-ratio');
+  const maxOrphanRatio =
+    rawRatio === undefined ? DEFAULT_MAX_ORPHAN_RATIO : rawRatio.trim() === '' ? NaN : Number(rawRatio);
+  if (!Number.isFinite(maxOrphanRatio) || maxOrphanRatio <= 0 || maxOrphanRatio > 1) {
+    throw new Error(`--max-orphan-ratio must be a number above 0 and at most 1, got "${rawRatio}"`);
   }
 
   return {
     apply: flag('delete'),
     skipRekognition: flag('skip-rekognition'),
+    allowVersioned: flag('allow-versioned'),
     minAgeHours,
     onlyCode,
+    maxOrphanRatio,
+    manifestPath: value('manifest') || null,
   };
 }
 
 async function main() {
-  const { apply, skipRekognition, minAgeHours, onlyCode } = parseArgs(process.argv.slice(2));
+  const {
+    apply, skipRekognition, allowVersioned, minAgeHours, onlyCode, maxOrphanRatio,
+    manifestPath: manifestArg,
+  } = parseArgs(process.argv.slice(2));
   const bucket = process.env.S3_BUCKET_NAME;
 
   if (!bucket) throw new Error('S3_BUCKET_NAME is not set');
@@ -441,8 +661,14 @@ async function main() {
 
   await mongoose.connect(process.env.MONGO_URI);
   const events = mongoose.connection.collection('events');
+  const photos = mongoose.connection.collection('photos');
   const liveCodes = await events.distinct('eventCode');
   const liveCollectionIds = await events.distinct('collectionId');
+
+  const manifestPath = path.resolve(
+    manifestArg || `orphan-purge-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+  );
+  if (apply) console.log(`Manifest: ${manifestPath}`);
 
   console.log(apply ? 'DELETING orphaned event media.' : 'Report only — pass --delete to remove anything.');
 
@@ -454,9 +680,35 @@ async function main() {
       liveCodes: liveCodes.filter(Boolean),
       liveCollectionIds: liveCollectionIds.filter(Boolean),
       stillLive: async (code) => !!(await events.findOne({ eventCode: codeKey(code) }, { projection: { _id: 1 } })),
+      // photos.s3Key is indexed, and an anchored prefix regex can use that
+      // index. This is the authoritative question — the code in a path is only
+      // a naming convention, and a photo row pointing into a prefix means a
+      // live event owns those bytes whatever the directory is called.
+      stillReferenced: async (targets) => {
+        for (const target of targets) {
+          const found = await photos.findOne(
+            { s3Key: { $regex: `^${escapeRegex(target)}` } },
+            { projection: { _id: 1 } }
+          );
+          if (found) return true;
+        }
+        return false;
+      },
+      writeManifest: async (code, objects) => {
+        const line =
+          JSON.stringify({
+            at: new Date().toISOString(),
+            bucket,
+            code,
+            objects: objects.map((o) => ({ key: o.Key, size: o.Size })),
+          }) + '\n';
+        // Appended and flushed before the delete, so an interrupted run still
+        // leaves a record of everything it had already removed.
+        await fs.promises.appendFile(manifestPath, line, 'utf8');
+      },
       now: () => Date.now(),
     },
-    { apply, minAgeHours, onlyCode }
+    { apply, minAgeHours, onlyCode, maxOrphanRatio, allowVersioned }
   );
 
   await mongoose.disconnect();
@@ -483,13 +735,18 @@ module.exports = {
   DELETE_BATCH,
   codeKey,
   isEventCodeShape,
+  RESERVED_NAMES,
   classifyCodes,
   isOldEnough,
   classifyCollections,
   chunk,
   parseArgs,
+  escapeRegex,
   humanBytes,
   collectS3Codes,
+  listObjectsShallow,
+  assertNotVersioned,
+  collectionCreatedAt,
   deleteObjects,
   sweep,
 };
