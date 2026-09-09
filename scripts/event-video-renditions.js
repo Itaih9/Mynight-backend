@@ -27,6 +27,24 @@
  * videos once the budget is spent; re-running picks up where it left off,
  * because anything already done is skipped.
  *
+ * UNATTENDED. Because a finished video is skipped, the same command run every
+ * night converges on its own and then costs nothing but a database query — so
+ * there is no need to decide in advance how many nights it takes, and no need
+ * to remember to turn it off. Nightly at 02:00, three hours, low priority:
+ *
+ *   # crontab -e
+ *   0 2 * * * cd /srv/mynight-backend && /usr/bin/node \
+ *     scripts/event-video-renditions.js --nice --max-minutes=180 \
+ *     >> /var/log/mynight-renditions.log 2>&1
+ *
+ * Adjust the path and the node binary to the box (`which node`). Check progress
+ * any morning with --dry-run: once it reports no missing renditions, remove the
+ * cron entry and set VIDEO_RENDITIONS_ENABLED=true.
+ *
+ * One caution: this is CPU-bound and shares the box with the API. Pick a window
+ * with no wedding in it — a Saturday night at 02:00 is not off-peak for this
+ * business.
+ *
  * --dry-run asks S3 what is actually there rather than reading the database
  * alone, because the database records the poster and knows nothing about the
  * rendition. It reports how many videos would 404 if VIDEO_RENDITIONS_ENABLED
