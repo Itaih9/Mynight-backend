@@ -16,6 +16,17 @@
  *   node scripts/event-video-renditions.js --limit=10  # process (or survey) the first 10
  *   node scripts/event-video-renditions.js             # process everything
  *
+ * This shares a box with the API, and transcoding is sequential and CPU-bound,
+ * so for a live server run it inside a window it cannot escape:
+ *
+ *   node scripts/event-video-renditions.js --nice --max-minutes=90
+ *   node scripts/event-video-renditions.js --nice=15 --max-bytes=20GB
+ *
+ * --nice (default 10, or --nice=N) runs ffmpeg at a lower priority so it yields
+ * to request handling. --max-bytes and --max-minutes stop the run between
+ * videos once the budget is spent; re-running picks up where it left off,
+ * because anything already done is skipped.
+ *
  * --dry-run asks S3 what is actually there rather than reading the database
  * alone, because the database records the poster and knows nothing about the
  * rendition. It reports how many videos would 404 if VIDEO_RENDITIONS_ENABLED
@@ -33,9 +44,80 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const args = process.argv.slice(2);
-const DRY_RUN = args.includes('--dry-run');
-const LIMIT = Number((args.find((a) => a.startsWith('--limit=')) || '').split('=')[1]) || 0;
+/**
+ * Bytes from a human-written size: 500MB, 2.5gb, 1_000_000. Plain digits are
+ * bytes. Returns NaN for anything it cannot read, so the caller can refuse it
+ * rather than silently treating a typo as "no budget".
+ */
+function parseBytes(text) {
+  const m = String(text).trim().replace(/_/g, '').match(/^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|tb)?$/i);
+  if (!m) return NaN;
+  const units = { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3, tb: 1024 ** 4 };
+  return Number(m[1]) * units[(m[2] || 'b').toLowerCase()];
+}
+
+/**
+ * This runs on the same box as the API. Transcoding is sequential and pegs a
+ * core for as long as it takes, so the flags that matter are the ones that let
+ * it be run in an off-peak window and stop on its own before anyone notices:
+ * a niceness, a byte budget and a wall-clock budget.
+ */
+function parseArgs(argv) {
+  const flag = (n) => argv.includes(`--${n}`);
+  const value = (n) => {
+    const found = argv.find((a) => a.startsWith(`--${n}=`));
+    return found === undefined ? undefined : found.slice(`--${n}=`.length);
+  };
+  const num = (n, raw) => {
+    if (raw === undefined) return undefined;
+    const v = raw.trim() === '' ? NaN : Number(raw);
+    if (!Number.isFinite(v) || v < 0) throw new Error(`--${n} must be a non-negative number, got "${raw}"`);
+    return v;
+  };
+
+  // `--nice 15` would set niceness to the default and then be ignored, which is
+  // the sort of thing you only discover from a load graph the next morning.
+  for (const n of ['limit', 'nice', 'max-bytes', 'max-minutes']) {
+    if (argv.includes(`--${n}`) && n !== 'nice') {
+      throw new Error(`--${n} takes its value with an equals sign: --${n}=<value>`);
+    }
+  }
+
+  const rawNice = value('nice');
+  let niceness = null;
+  if (rawNice !== undefined) {
+    niceness = num('nice', rawNice);
+    if (niceness > 19) throw new Error(`--nice must be between 0 and 19, got "${rawNice}"`);
+  } else if (flag('nice')) {
+    niceness = 10; // enough to yield to the API without stalling outright
+  }
+
+  const rawBytes = value('max-bytes');
+  let maxBytes = 0;
+  if (rawBytes !== undefined) {
+    maxBytes = parseBytes(rawBytes);
+    if (!Number.isFinite(maxBytes) || maxBytes <= 0) {
+      throw new Error(`--max-bytes must be a size like 500MB or 2GB, got "${rawBytes}"`);
+    }
+  }
+
+  const maxMinutes = num('max-minutes', value('max-minutes')) || 0;
+
+  return {
+    dryRun: flag('dry-run'),
+    limit: num('limit', value('limit')) || 0,
+    niceness,
+    maxBytes,
+    maxMinutes,
+  };
+}
+
+/**
+ * Set by main() from its argv, rather than parsed at import: the file is also
+ * required by its checks, and parsing then would read the test runner's own
+ * argv and refuse it.
+ */
+let OPTS = { dryRun: false, limit: 0, niceness: null, maxBytes: 0, maxMinutes: 0 };
 
 const BUCKET = process.env.S3_BUCKET_NAME;
 
@@ -139,18 +221,59 @@ function summarize(rows) {
   };
 }
 
+/**
+ * Whether this run has spent its budget, and which one. Returns null to carry
+ * on. Budgets are checked BETWEEN videos, never mid-transcode: stopping halfway
+ * would leave a partial rendition in the bucket, and the point of the budget is
+ * to bound the load, not to abandon work already paid for.
+ */
+function shouldStop({ bytesDone, elapsedMs, maxBytes, maxMinutes }) {
+  if (maxBytes && bytesDone >= maxBytes) return 'byte budget';
+  if (maxMinutes && elapsedMs >= maxMinutes * 60 * 1000) return 'time budget';
+  return null;
+}
+
+/**
+ * `nice` is not everywhere, and a missing one must not take the run with it —
+ * the point of the flag is to be gentler, not to be a new way to fail.
+ */
+let niceChecked = false;
+let niceAvailable = false;
+function ffmpegCommand(ffmpegArgs) {
+  if (OPTS.niceness === null) return ['ffmpeg', ffmpegArgs];
+  if (!niceChecked) {
+    niceChecked = true;
+    try {
+      execFileSync('nice', ['-n', '0', 'true'], { stdio: 'ignore' });
+      niceAvailable = true;
+    } catch {
+      console.warn('  (nice is unavailable here — running ffmpeg at normal priority)');
+    }
+  }
+  return niceAvailable
+    ? ['nice', ['-n', String(OPTS.niceness), 'ffmpeg', ...ffmpegArgs]]
+    : ['ffmpeg', ffmpegArgs];
+}
+
 function poster(src, dest) {
   // Seek a second in — frame 0 is often a fade-in or a black leader.
+  const run = (extra) => {
+    const [cmd, cmdArgs] = ffmpegCommand([...extra, '-i', src, '-frames:v', '1',
+      '-vf', 'scale=800:-2', '-q:v', '4', dest]);
+    execFileSync(cmd, cmdArgs, { stdio: 'ignore' });
+  };
   try {
-    execFileSync('ffmpeg', ['-y', '-ss', '1', '-i', src, '-frames:v', '1',
-      '-vf', 'scale=800:-2', '-q:v', '4', dest], { stdio: 'ignore' });
+    run(['-y', '-ss', '1']);
   } catch {
-    execFileSync('ffmpeg', ['-y', '-i', src, '-frames:v', '1',
-      '-vf', 'scale=800:-2', '-q:v', '4', dest], { stdio: 'ignore' });
+    run(['-y']);
   }
 }
 
-async function main() {
+async function main(argv = process.argv.slice(2)) {
+  OPTS = parseArgs(argv);
+  const DRY_RUN = OPTS.dryRun;
+  const LIMIT = OPTS.limit;
+
   await mongoose.connect(process.env.MONGO_URI);
   const photos = mongoose.connection.collection('photos');
 
@@ -216,9 +339,22 @@ async function main() {
   let skipped = 0;
   let failed = 0;
   let seen = 0;
+  let bytesDone = 0;
+  let stoppedBy = null;
+  const startedAt = Date.now();
+  if (OPTS.niceness !== null) console.log(`Running ffmpeg at niceness ${OPTS.niceness}.`);
+  if (OPTS.maxBytes) console.log(`Byte budget: ${humanBytes(OPTS.maxBytes)} of source video.`);
+  if (OPTS.maxMinutes) console.log(`Time budget: ${OPTS.maxMinutes} minute(s).`);
 
   while (await cursor.hasNext()) {
     if (LIMIT && processed >= LIMIT) break;
+    stoppedBy = shouldStop({
+      bytesDone,
+      elapsedMs: Date.now() - startedAt,
+      maxBytes: OPTS.maxBytes,
+      maxMinutes: OPTS.maxMinutes,
+    });
+    if (stoppedBy) break;
     const doc = await cursor.next();
     const key = doc.s3Key;
     if (!key) continue;
@@ -243,6 +379,9 @@ async function main() {
     try {
       await download(key, src);
       const srcBytes = fs.statSync(src).size;
+      // Counted on download, not on success: the bytes were pulled and the CPU
+      // was spent either way, and the budget exists to bound exactly that.
+      bytesDone += srcBytes;
 
       if (needPoster) {
         const jpg = path.join(tmp, 'poster.jpg');
@@ -268,9 +407,10 @@ async function main() {
 
       if (needDisplay) {
         const out = path.join(tmp, 'out.mp4');
-        execFileSync('ffmpeg', ['-y', '-i', src, '-vf', 'scale=-2:720',
+        const [cmd, cmdArgs] = ffmpegCommand(['-y', '-i', src, '-vf', 'scale=-2:720',
           '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26',
-          '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', out], { stdio: 'ignore' });
+          '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', out]);
+        execFileSync(cmd, cmdArgs, { stdio: 'ignore' });
         await s3.upload({
           Bucket: BUCKET,
           Key: displayKey,
@@ -298,9 +438,13 @@ async function main() {
   fs.rmSync(tmp, { recursive: true, force: true });
   await mongoose.disconnect();
   console.log(`done: ${processed} processed, ${skipped} already had renditions, ${failed} failed`);
+  console.log(`      ${humanBytes(bytesDone)} of source video read in ${((Date.now() - startedAt) / 60000).toFixed(1)} min`);
+  if (stoppedBy) {
+    console.log(`      STOPPED EARLY on the ${stoppedBy}. Re-run to continue — finished videos are skipped.`);
+  }
 }
 
-module.exports = { main, mapPool, humanBytes, survey, summarize, posterKeyFor, displayKeyFor };
+module.exports = { main, parseArgs, parseBytes, shouldStop, mapPool, humanBytes, survey, summarize, posterKeyFor, displayKeyFor };
 
 if (require.main === module) {
   main().catch(async (e) => {
