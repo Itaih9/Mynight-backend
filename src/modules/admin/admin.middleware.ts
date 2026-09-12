@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { env } from '@/shared/config/env';
+import { secretMatches } from '@/shared/utils/secrets';
 import { Event } from '@/modules/events/events.model';
 
 export interface AdminRequest extends Request {
@@ -20,18 +20,12 @@ interface AdminTokenPayload {
 }
 
 /**
- * Constant-time comparison against the configured service token. Returns false
- * when no token is configured, so the whole mechanism is off unless an operator
- * explicitly sets SERVICE_API_TOKEN.
+ * Off unless an operator explicitly sets SERVICE_API_TOKEN. The comparison
+ * itself now lives in shared/utils/secrets, so the internal webhook is checked
+ * the same way rather than with a plain !==.
  */
-const serviceTokenMatches = (candidate: string): boolean => {
-  const expected = env.SERVICE_API_TOKEN;
-  if (!expected || !candidate) return false;
-  const a = Buffer.from(candidate);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
-};
+const serviceTokenMatches = (candidate: string): boolean =>
+  secretMatches(candidate, env.SERVICE_API_TOKEN);
 
 export const adminProtect = async (
   req: AdminRequest,

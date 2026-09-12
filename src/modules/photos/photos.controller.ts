@@ -4,6 +4,16 @@ import { AuthRequest } from '@/shared/middleware/auth.middleware';
 import { Photo } from './photos.model';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
+import { secretMatches } from '@/shared/utils/secrets';
+
+/**
+ * A poster is an image derived from one specific video: same key, a suffix, an
+ * image extension. Anything else is a caller naming an unrelated object.
+ */
+const isPosterKeyFor = (s3Key: string, posterKey: string): boolean =>
+  posterKey.startsWith(`${s3Key}-`) &&
+  !posterKey.includes('..') &&
+  /\.(jpe?g|png)$/i.test(posterKey);
 
 /**
  * A ceiling on abuse, not on customers. "Download all" in the guest gallery
@@ -149,14 +159,29 @@ export class PhotosController {
 
   async setVideoPoster(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const secret = req.header('x-internal-secret');
-      if (!secret || secret !== env.INTERNAL_WEBHOOK_SECRET) {
+      // Unset INTERNAL_WEBHOOK_SECRET refuses everything: secretMatches returns
+      // false with nothing configured. Previously the secret defaulted to a
+      // string published in this repository, so any deployment that had not set
+      // it accepted this call from anyone.
+      if (!secretMatches(req.header('x-internal-secret'), env.INTERNAL_WEBHOOK_SECRET)) {
         res.status(401).json({ success: false, error: 'Unauthorized' });
         return;
       }
       const { s3Key, posterKey } = req.body || {};
-      if (!s3Key || !posterKey) {
+      if (typeof s3Key !== 'string' || typeof posterKey !== 'string' || !s3Key || !posterKey) {
         res.status(400).json({ success: false, error: 's3Key and posterKey required' });
+        return;
+      }
+      // The poster must be derived from THIS video. setVideoPoster feeds
+      // posterKey to Rekognition as the image to index into the event's face
+      // collection, so an unconstrained key let a caller index any object in
+      // the bucket into any wedding's collection — putting a face of their
+      // choosing among a couple's photos.
+      if (!isPosterKeyFor(s3Key, posterKey)) {
+        res.status(400).json({
+          success: false,
+          error: 'posterKey must be derived from s3Key, e.g. `${s3Key}-poster.jpg`',
+        });
         return;
       }
       const photo = await photosService.setVideoPoster(s3Key, posterKey);

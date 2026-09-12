@@ -63,7 +63,14 @@ interface EnvConfig {
   SUMIT_COMPANY_ID: string;
   SUMIT_API_KEY: string;
   SUMIT_PUBLIC_KEY: string;
-  INTERNAL_WEBHOOK_SECRET: string;
+  /**
+   * Guards POST /api/photos/internal/video-poster. Optional on purpose: unset
+   * means that endpoint refuses everything, which is the safe direction. It
+   * used to default to 'change-me-in-production' — a value published in this
+   * repository, so any deployment that had not set it was accepting the call
+   * from anyone.
+   */
+  INTERNAL_WEBHOOK_SECRET?: string;
   // Static bearer token for automated admin API access (the Claude service
   // principal). Grants admin-level access EXCEPT deleting accounts or deleting
   // events it did not create. Unset => service-token auth is disabled entirely.
@@ -109,6 +116,6 @@ export const env: EnvConfig = {
   SUMIT_COMPANY_ID: getEnv('SUMIT_COMPANY_ID', ''),
   SUMIT_API_KEY: getEnv('SUMIT_API_KEY', ''),
   SUMIT_PUBLIC_KEY: getEnv('SUMIT_PUBLIC_KEY', ''),
-  INTERNAL_WEBHOOK_SECRET: getEnv('INTERNAL_WEBHOOK_SECRET', 'change-me-in-production'),
+  INTERNAL_WEBHOOK_SECRET: process.env.INTERNAL_WEBHOOK_SECRET,
   SERVICE_API_TOKEN: process.env.SERVICE_API_TOKEN,
 };

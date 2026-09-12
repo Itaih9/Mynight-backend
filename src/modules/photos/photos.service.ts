@@ -67,6 +67,14 @@ function mulberry32(seed: number): () => number {
 export const posterKeyFor = (s3Key: string): string => `${s3Key}-poster.jpg`;
 
 /**
+ * How many posters may wait for their Photo row, and for how long. A poster can
+ * arrive just before the document it belongs to, which is what this map is for;
+ * anything beyond that is a caller getting it wrong, and should not accumulate.
+ */
+const PENDING_POSTER_LIMIT = 500;
+const PENDING_POSTER_TTL_MS = 10 * 60 * 1000;
+
+/**
  * The S3 object Rekognition should actually look at for an upload.
  *
  * For an image that is the upload itself. For a VIDEO it is the poster frame:
@@ -248,9 +256,24 @@ class PhotosService {
   }
 
   private rememberPendingVideoPoster(s3Key: string, posterKey: string): void {
+    // Bounded, because this is reached from an HTTP endpoint: a caller naming
+    // photos that do not exist would otherwise grow this map for as long as the
+    // process lives. Entries expire after ten minutes, but expiry alone frees
+    // nothing until something reads that exact key back.
+    const now = Date.now();
+    for (const [key, entry] of this.pendingVideoPosters) {
+      if (entry.expiresAt < now) this.pendingVideoPosters.delete(key);
+    }
+    while (this.pendingVideoPosters.size >= PENDING_POSTER_LIMIT) {
+      // Map iterates in insertion order, so this drops the oldest.
+      const oldest = this.pendingVideoPosters.keys().next();
+      if (oldest.done) break;
+      this.pendingVideoPosters.delete(oldest.value);
+    }
+
     this.pendingVideoPosters.set(s3Key, {
       posterUrl: `${env.CLOUDFRONT_URL}/${posterKey}`,
-      expiresAt: Date.now() + 10 * 60 * 1000,
+      expiresAt: now + PENDING_POSTER_TTL_MS,
     });
   }
 
