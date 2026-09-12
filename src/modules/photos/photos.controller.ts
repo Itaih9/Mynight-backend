@@ -5,6 +5,46 @@ import { Photo } from './photos.model';
 import { s3 } from '@/shared/config/aws';
 import { env } from '@/shared/config/env';
 import { secretMatches } from '@/shared/utils/secrets';
+import logger from '@/shared/utils/logger';
+import crypto from 'crypto';
+
+/**
+ * The value INTERNAL_WEBHOOK_SECRET used to default to. It is published in this
+ * repository, so naming it in a log leaks nothing — and "the caller is using
+ * the repo default" is the single most useful thing a log can say here.
+ */
+const PUBLISHED_DEFAULT_SECRET = 'change-me-in-production';
+
+/**
+ * Describe a presented secret without writing it down. A length and a short
+ * SHA-256 prefix are enough to compare against
+ * `printf %s "$SECRET" | sha256sum` on the caller, which is how you find out
+ * whether two systems hold the same value without either of them printing it.
+ */
+const describeSecret = (secret: unknown): string => {
+  if (typeof secret !== 'string' || !secret) return 'none presented';
+  if (secret === PUBLISHED_DEFAULT_SECRET) return 'the published repo default';
+  const fingerprint = crypto.createHash('sha256').update(secret).digest('hex').slice(0, 8);
+  return `${secret.length} chars, sha256:${fingerprint}`;
+};
+
+/**
+ * At most one line per case per window. This endpoint is unauthenticated by
+ * definition — it is the thing deciding whether to authenticate — so logging
+ * every rejection would hand anyone a way to fill the disk.
+ */
+const AUTH_LOG_WINDOW_MS = 5 * 60 * 1000;
+const lastLoggedAt = new Map<string, number>();
+const logThrottled = (key: string, emit: () => void): void => {
+  const now = Date.now();
+  if (now - (lastLoggedAt.get(key) ?? 0) < AUTH_LOG_WINDOW_MS) return;
+  lastLoggedAt.set(key, now);
+  emit();
+};
+
+/** Bounded, because it is caller-supplied and ends up in a log line. */
+const forLog = (value: string): string =>
+  value.length > 200 ? `${value.slice(0, 200)}…` : value;
 
 /**
  * A poster is an image derived from one specific video: same key, a suffix, an
@@ -163,7 +203,29 @@ export class PhotosController {
       // false with nothing configured. Previously the secret defaulted to a
       // string published in this repository, so any deployment that had not set
       // it accepted this call from anyone.
-      if (!secretMatches(req.header('x-internal-secret'), env.INTERNAL_WEBHOOK_SECRET)) {
+      const presented = req.header('x-internal-secret');
+      if (!secretMatches(presented, env.INTERNAL_WEBHOOK_SECRET)) {
+        // Loud, because the failure is otherwise invisible: the poster Lambda
+        // gets a 401 and nobody sees it, videos keep their black thumbnails,
+        // and — since the poster is the only image Rekognition can read from a
+        // video — no video enters a face album again.
+        if (!env.INTERNAL_WEBHOOK_SECRET) {
+          logThrottled('unconfigured', () =>
+            logger.error(
+              'video-poster refused: INTERNAL_WEBHOOK_SECRET is not set on this server, so the endpoint ' +
+                `rejects everything. Caller presented ${describeSecret(presented)}. ` +
+                'Video posters are not being recorded, and videos will not reach face albums until it is set.'
+            )
+          );
+        } else {
+          logThrottled('mismatch', () =>
+            logger.warn(
+              `video-poster refused: wrong x-internal-secret. Caller presented ${describeSecret(presented)}; ` +
+                'this server expects a different value. Either a prober, or the poster Lambda and the server ' +
+                'have drifted apart.'
+            )
+          );
+        }
         res.status(401).json({ success: false, error: 'Unauthorized' });
         return;
       }
@@ -178,6 +240,14 @@ export class PhotosController {
       // the bucket into any wedding's collection — putting a face of their
       // choosing among a couple's photos.
       if (!isPosterKeyFor(s3Key, posterKey)) {
+        // Says exactly what was sent, so a caller naming posters by some other
+        // convention can be identified from the log rather than guessed at.
+        logThrottled('bad-poster-key', () =>
+          logger.warn(
+            `video-poster refused: posterKey does not belong to s3Key. ` +
+              `s3Key=${forLog(s3Key)} posterKey=${forLog(posterKey)}`
+          )
+        );
         res.status(400).json({
           success: false,
           error: 'posterKey must be derived from s3Key, e.g. `${s3Key}-poster.jpg`',
