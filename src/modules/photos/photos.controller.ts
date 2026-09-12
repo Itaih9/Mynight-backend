@@ -50,7 +50,12 @@ const forLog = (value: string): string =>
  * A poster is an image derived from one specific video: same key, a suffix, an
  * image extension. Anything else is a caller naming an unrelated object.
  */
-const isPosterKeyFor = (s3Key: string, posterKey: string): boolean =>
+export const isPosterKeyFor = (s3Key: string, posterKey: unknown): boolean =>
+  // Defensive about the type as well as the value: the handler already rejects
+  // a non-string, but a predicate that throws on one is a trap for the next
+  // caller — and it made this disagree with the diagnostic script, which is
+  // supposed to predict exactly what this returns.
+  typeof posterKey === 'string' &&
   posterKey.startsWith(`${s3Key}-`) &&
   !posterKey.includes('..') &&
   /\.(jpe?g|png)$/i.test(posterKey);

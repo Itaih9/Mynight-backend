@@ -42,6 +42,7 @@ scripts/*
 !scripts/showcase-index-faces.js
 !scripts/backfill-ai-categories.js
 !scripts/purge-orphaned-event-media.js
+!scripts/check-poster-webhook.js
 
 # claude-council output. Plugin working files, written per run and named by
 # timestamp — useful while reviewing, noise in history. .claude/launch.json
