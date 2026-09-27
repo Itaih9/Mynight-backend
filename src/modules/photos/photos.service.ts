@@ -9,6 +9,7 @@ import { planFor, rollLengthFor } from '@/shared/config/flashPlans';
 import { featuresFor } from '@/shared/config/packageFeatures';
 import { cameraMessage, cameraLanguageOf } from '@/shared/config/cameraStrings';
 import logger from '@/shared/utils/logger';
+import { toRekognitionImage } from '@/shared/utils/selfieImage';
 import { nanoid } from 'nanoid';
 import archiver from 'archiver';
 import { Response } from 'express';
@@ -487,15 +488,24 @@ class PhotosService {
       throw new ValidationError(cameraMessage(event, 'FACES_REQUIRE_PLUS'));
     }
 
+    // A gallery-picked HEIC selfie becomes JPEG here — Rekognition refuses HEIC.
+    let selfie;
+    try {
+      selfie = await toRekognitionImage(file);
+    } catch (error: any) {
+      logger.warn(`Could not convert selfie ${file.originalname}: ${error?.message}`);
+      throw new ValidationError('לא הצלחנו לקרוא את התמונה — נסו לצלם סלפי במצלמה');
+    }
+
     // Upload selfie to S3 temporarily
-    const selfieKey = `events/${event.eventCode}/selfies/${Date.now()}-${file.originalname}`;
+    const selfieKey = `events/${event.eventCode}/selfies/${Date.now()}-${selfie.name}`;
 
     await s3
       .putObject({
         Bucket: env.S3_BUCKET_NAME,
         Key: selfieKey,
-        Body: file.buffer,
-        ContentType: file.mimetype,
+        Body: selfie.buffer,
+        ContentType: selfie.mimeType,
       })
       .promise();
 
