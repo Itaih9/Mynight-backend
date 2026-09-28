@@ -290,13 +290,32 @@ export class PhotosController {
         return;
       }
 
-      const s3Object = await s3.getObject({
-        Bucket: env.S3_BUCKET_NAME,
-        Key: photo.s3Key,
-      }).promise();
+      // `?variant=display` serves the web copy (~0.3 MB) — the "fast" choice
+      // for saving several photos to a phone — or the original if a photo has
+      // none. Videos always get the original.
+      const isVideo = Boolean(photo.metadata?.mimeType?.startsWith('video/'));
+      let s3Object;
+      let servedDisplay = false;
+      if (req.query.variant === 'display' && !isVideo) {
+        try {
+          s3Object = await s3.getObject({ Bucket: env.S3_BUCKET_NAME, Key: `display/${photo.s3Key}` }).promise();
+          servedDisplay = true;
+        } catch {
+          // No web copy for this one: fall through to the original.
+        }
+      }
+      if (!s3Object) {
+        s3Object = await s3.getObject({
+          Bucket: env.S3_BUCKET_NAME,
+          Key: photo.s3Key,
+        }).promise();
+      }
 
       const fileName = photo.s3Key.split('/').pop() || `photo-${photo._id}.jpg`;
-      res.setHeader('Content-Type', photo.metadata.mimeType || 'image/jpeg');
+      res.setHeader(
+        'Content-Type',
+        (servedDisplay && s3Object.ContentType) || photo.metadata.mimeType || 'image/jpeg'
+      );
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       res.send(s3Object.Body);
     } catch (error) {
@@ -328,7 +347,8 @@ export class PhotosController {
 
   async getDownloadUrl(req: Request, res: Response, next: NextFunction) {
     try {
-      const url = await photosService.getDownloadUrl(req.params.id);
+      const variant = req.query.variant === 'display' ? 'display' : undefined;
+      const url = await photosService.getDownloadUrl(req.params.id, variant);
       res.json({
         success: true,
         data: { url },

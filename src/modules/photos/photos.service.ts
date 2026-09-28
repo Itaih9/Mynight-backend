@@ -1159,17 +1159,34 @@ class PhotosService {
     logger.debug(`Streamed zip with ${photos.length} photos`);
   }
 
-  async getDownloadUrl(photoId: string): Promise<string> {
+  /**
+   * A signed link that downloads the photo as a file. `variant: 'display'`
+   * signs the web copy (~2048px, ~0.3 MB) instead of the original (~4 MB) —
+   * the "fast" choice when a guest saves several photos to a phone. A video,
+   * or a photo whose web copy does not exist, gets the original.
+   */
+  async getDownloadUrl(photoId: string, variant?: 'display'): Promise<string> {
     const photo = await Photo.findById(photoId);
     if (!photo) {
       throw new NotFoundError('Photo');
+    }
+
+    let key = photo.s3Key;
+    if (variant === 'display' && !photo.metadata?.mimeType?.startsWith('video/')) {
+      const displayKey = `display/${photo.s3Key}`;
+      try {
+        await s3.headObject({ Bucket: env.S3_BUCKET_NAME, Key: displayKey }).promise();
+        key = displayKey;
+      } catch {
+        // No web copy for this one (older upload): the original it is.
+      }
     }
 
     const fileName = photo.s3Key.split('/').pop() || `photo-${photo._id}.jpg`;
 
     const url = s3.getSignedUrl('getObject', {
       Bucket: env.S3_BUCKET_NAME,
-      Key: photo.s3Key,
+      Key: key,
       Expires: 3600,
       ResponseContentDisposition: `attachment; filename="${fileName}"`,
     });
